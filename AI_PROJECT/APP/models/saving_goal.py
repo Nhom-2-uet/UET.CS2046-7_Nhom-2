@@ -3,7 +3,13 @@ from datetime import date, datetime
 from typing import Literal
 
 
-GoalStatus = Literal["active", "completed", "paused", "cancelled"]
+GoalStatus = Literal[
+    "active",
+    "completed",
+    "paused",
+    "cancelled",
+    "failed",
+]
 
 
 @dataclass
@@ -15,3 +21,9 @@ class SavingGoal:
     deadline: date
     status: GoalStatus
     created_at: datetime
+
+    # Tiến độ có thể âm nếu chi vượt cả quỹ đệm.
+    progress_vnd: int = 0
+
+    # Quỹ đệm không âm; chi vượt sẽ dùng quỹ này trước.
+    buffer_vnd: int = 0
