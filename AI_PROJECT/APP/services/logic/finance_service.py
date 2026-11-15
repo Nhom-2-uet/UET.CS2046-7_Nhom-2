@@ -6,19 +6,45 @@ class FinanceService:
 
      @staticmethod
      def _prepare_df(transactions: list[Dict[str, Any]]) -> pd.DataFrame:
-        "Chuyển đổi list dict từ DB sang DataFrame và chuẩn hóa kiểu dữ liệu"
-        required_cols = ['amount', 'type', 'category', 'date']
+        """Chuẩn hóa dict hoặc Transaction thành các cột dùng trong tính toán."""
+        required_cols = ["amount", "type", "category", "date"]
         if not transactions:
             return pd.DataFrame(columns=required_cols)
 
-        df = pd.DataFrame(transactions)
+        rows = []
+        for transaction in transactions:
+            if isinstance(transaction, dict):
+                rows.append({
+                    "amount": transaction.get("amount", transaction.get("amount_vnd")),
+                    "type": transaction.get("type", transaction.get("transaction_type")),
+                    "category": transaction.get("category", transaction.get("category_id")),
+                    "date": transaction.get("date", transaction.get("transaction_date")),
+                })
+            else:
+                rows.append({
+                    "amount": getattr(
+                        transaction, "amount", getattr(transaction, "amount_vnd", None)
+                    ),
+                    "type": getattr(
+                        transaction,
+                        "type",
+                        getattr(transaction, "transaction_type", None),
+                    ),
+                    "category": getattr(
+                        transaction,
+                        "category",
+                        getattr(transaction, "category_id", None),
+                    ),
+                    "date": getattr(
+                        transaction,
+                        "date",
+                        getattr(transaction, "transaction_date", None),
+                    ),
+                })
 
-        for col in required_cols:
-            if col not in df.columns:
-                df[col] = np.nan
-
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
+        df = pd.DataFrame(rows, columns=required_cols)
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
         return df.dropna(subset=['date'])
 
      @staticmethod

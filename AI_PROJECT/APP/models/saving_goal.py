@@ -21,6 +21,10 @@ class SavingGoal:
     status: GoalStatus
     created_at: datetime
 
+    def __post_init__(self) -> None:
+        if self.target_amount_vnd <= 0:
+            raise ValueError("target_amount_vnd phải lớn hơn 0.")
+
     # Tiến độ có thể âm nếu chi vượt cả quỹ đệm.
     progress_vnd: int = 0
 

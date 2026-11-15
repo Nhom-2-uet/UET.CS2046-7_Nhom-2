@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
-from services.logic import finance_service
+from services.logic.finance_service import FinanceService
 
 
 class AnomalyService:
@@ -19,7 +19,7 @@ class AnomalyService:
         if not transactions:
             return []
 
-        df = finance_service._prepare_df(transactions)
+        df = FinanceService._prepare_df(transactions)
         if df.empty or 'type' not in df.columns:
             return []
 

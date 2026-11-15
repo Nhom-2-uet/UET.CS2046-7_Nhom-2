@@ -22,6 +22,21 @@ class TransactionDraft:
     input_source: InputSource
     exclude_from_saving: bool = False
 
+    def __post_init__(self) -> None:
+        if self.category_id <= 0:
+            raise ValueError("category_id phải là số nguyên dương.")
+
+        if self.amount_vnd <= 0:
+            raise ValueError("amount_vnd phải lớn hơn 0.")
+
+        if self.transaction_type not in {"income", "expense"}:
+            raise ValueError("transaction_type phải là income hoặc expense.")
+
+        if self.input_source not in {"manual", "natural_language"}:
+            raise ValueError(
+                "input_source phải là manual hoặc natural_language."
+            )
+
 
 @dataclass
 class Transaction:

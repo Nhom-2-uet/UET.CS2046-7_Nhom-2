@@ -11,3 +11,10 @@ class BudgetSettings:
     payday: int | None
     reserve_rate: Decimal
     updated_at: datetime
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.reserve_rate <= 1:
+            raise ValueError("reserve_rate phải nằm trong khoảng từ 0 đến 1.")
+
+        if self.payday is not None and not 1 <= self.payday <= 31:
+            raise ValueError("payday phải nằm trong khoảng từ 1 đến 31.")
