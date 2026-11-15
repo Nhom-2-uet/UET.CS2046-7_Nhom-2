@@ -5,7 +5,6 @@ from typing import Literal
 
 GoalStatus = Literal[
     "active",
-    "paused",
     "finished",
     "failed",
     "cancelled",

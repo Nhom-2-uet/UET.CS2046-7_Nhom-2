@@ -34,7 +34,7 @@ PROGRESS_COLUMNS = """
     FROM saving_goal_daily_progress
 """
 
-ALLOWED_STATUSES = {"active", "paused", "finished", "failed", "cancelled"}
+ALLOWED_STATUSES = {"active", "finished", "failed", "cancelled"}
 TERMINAL_STATUSES = {"finished", "failed", "cancelled"}
 ALLOWED_SURPLUS_ACTIONS = {"to_goal", "to_buffer", "none"}
 
@@ -225,7 +225,7 @@ def update_saving_goal_details(
             UPDATE saving_goals
             SET target_amount_vnd = %s, deadline = %s
             WHERE goal_id = %s AND user_id = %s
-              AND status IN ('active', 'paused')
+              AND status = 'active'
             """,
             (target_amount_vnd, deadline, goal_id, user_id),
         )
