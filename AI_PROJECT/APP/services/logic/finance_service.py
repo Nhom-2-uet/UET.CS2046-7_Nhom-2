@@ -17,7 +17,10 @@ class FinanceService:
                 rows.append({
                     "amount": transaction.get("amount", transaction.get("amount_vnd")),
                     "type": transaction.get("type", transaction.get("transaction_type")),
-                    "category": transaction.get("category", transaction.get("category_id")),
+                    "category": transaction.get(
+                        "category_name",
+                        transaction.get("category", transaction.get("category_id")),
+                    ),
                     "date": transaction.get("date", transaction.get("transaction_date")),
                 })
             else:
@@ -32,8 +35,12 @@ class FinanceService:
                     ),
                     "category": getattr(
                         transaction,
-                        "category",
-                        getattr(transaction, "category_id", None),
+                        "category_name",
+                        getattr(
+                            transaction,
+                            "category",
+                            getattr(transaction, "category_id", None),
+                        ),
                     ),
                     "date": getattr(
                         transaction,
@@ -48,7 +55,7 @@ class FinanceService:
         return df.dropna(subset=['date'])
 
      @staticmethod
-     def _filter_by_date(df,day, month, year):
+     def _filter_by_date(df, day=None, month=None, year=None):
          "Hàm phụ trợ lọc DataFrame theo ngày, tháng, năm bằng Boolean Mask."
          mask = pd.Series(True, index=df.index)
          if day is not None:
@@ -70,7 +77,7 @@ class FinanceService:
         return float(filtered['amount'].sum())
 
      @classmethod
-     def calculate_expense_by_period(cls, transactions, day, month, year ):
+     def calculate_expense_by_period(cls, transactions, day=None, month=None, year=None):
         df = cls._prepare_df(transactions)
         if df.empty:
             return 0.0
@@ -125,7 +132,7 @@ class FinanceService:
         
         status = "NORMAL"
         if usage_percent >= 100:
-            status = "OVER_BUDGET"
+            status = "EXCEEDED"
         elif usage_percent >= 80:
             status = "WARNING"
 

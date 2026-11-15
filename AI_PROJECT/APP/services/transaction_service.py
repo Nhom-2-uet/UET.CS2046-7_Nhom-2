@@ -13,10 +13,13 @@ from database.connection import get_connection
 # Liệt kê rõ tên cột, viết một lần, nơi nào cần thì dùng lại.
 SELECT_COLUMNS = """
     SELECT
-        transaction_id, user_id, category_id, transaction_type,
-        amount_vnd, description, transaction_date, input_source,
-        exclude_from_saving, created_at, updated_at
-    FROM transactions
+        t.transaction_id, t.user_id, t.category_id,
+        c.name AS category_name,
+        t.transaction_type, t.amount_vnd, t.description,
+        t.transaction_date, t.input_source, t.exclude_from_saving,
+        t.created_at, t.updated_at
+    FROM transactions AS t
+    JOIN categories AS c ON c.category_id = t.category_id
 """
 
 
@@ -52,6 +55,7 @@ def _row_to_transaction(row: dict) -> Transaction:
         transaction_id=row["transaction_id"],
         user_id=row["user_id"],
         category_id=row["category_id"],
+        category_name=row["category_name"],
         transaction_type=row["transaction_type"],
         amount_vnd=row["amount_vnd"],
         description=row["description"],

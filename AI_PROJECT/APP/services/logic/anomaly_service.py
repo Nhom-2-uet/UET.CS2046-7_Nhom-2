@@ -39,3 +39,11 @@ class AnomalyService:
             (exp_df['amount'] - exp_df['mean']) / exp_df['std'],
             0.0
         )
+
+        unusual = exp_df[
+            (exp_df['cat_count'] >= min_category_count)
+            & (exp_df['z_score'] >= z_threshold)
+            & (exp_df['amount'] >= exp_df['mean'] * multiplier_threshold)
+        ].copy()
+
+        return unusual.to_dict(orient='records')

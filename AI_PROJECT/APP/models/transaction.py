@@ -45,6 +45,7 @@ class Transaction:
     transaction_id: int
     user_id: int
     category_id: int
+    category_name: str
     transaction_type: TransactionType
     amount_vnd: int
     description: str | None
