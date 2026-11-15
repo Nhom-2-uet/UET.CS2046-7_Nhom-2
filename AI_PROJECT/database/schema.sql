@@ -103,7 +103,14 @@ CREATE TABLE IF NOT EXISTS saving_goals (
     name VARCHAR(150) NOT NULL,
     target_amount_vnd BIGINT UNSIGNED NOT NULL,
     deadline DATE NOT NULL,
-    status ENUM('active', 'completed', 'paused', 'cancelled')
+    -- Tiến độ có thể âm nếu chi vượt quá số dư quỹ đệm
+    progress_vnd BIGINT NOT NULL DEFAULT 0,
+
+    -- Quỹ đệm không âm; chi vượt sẽ trừ quỹ này về 0 trước
+    buffer_vnd BIGINT UNSIGNED NOT NULL DEFAULT 0,
+
+    -- failed dùng khi hết hạn mà mục tiêu vẫn chưa hoàn thành
+    status ENUM('active', 'completed', 'paused', 'cancelled', 'failed')
         NOT NULL DEFAULT 'active',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -135,7 +142,46 @@ CREATE TABLE IF NOT EXISTS goal_baselines (
 ) ENGINE=InnoDB;
 
 
--- 9. Thêm các danh mục ban đầu
+-- 9. Lịch sử tiến trình tiết kiệm theo ngày
+CREATE TABLE IF NOT EXISTS saving_goal_daily_progress (
+    progress_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    goal_id INT UNSIGNED NOT NULL,
+
+    -- Mỗi mục tiêu lưu tối đa một bản tổng kết cho một ngày
+    progress_date DATE NOT NULL,
+
+    -- Hạn mức chi và số tiền thực tế đã chi trong ngày
+    planned_spending_limit_vnd BIGINT UNSIGNED NOT NULL,
+    actual_spending_vnd BIGINT UNSIGNED NOT NULL DEFAULT 0,
+
+    -- Khoản tiết kiệm cơ bản theo kế hoạch trong ngày
+    planned_saving_vnd BIGINT UNSIGNED NOT NULL DEFAULT 0,
+
+    -- Mức thay đổi trong ngày; số âm biểu thị bị trừ
+    progress_change_vnd BIGINT NOT NULL DEFAULT 0,
+    buffer_change_vnd BIGINT NOT NULL DEFAULT 0,
+
+    -- Số dư sau khi kết thúc ngày; tiến độ có thể âm, quỹ đệm không âm
+    progress_after_vnd BIGINT NOT NULL,
+    buffer_after_vnd BIGINT UNSIGNED NOT NULL,
+
+    -- Ghi lại cách xử lý khoản dư trong ngày
+    surplus_action ENUM('to_goal', 'to_buffer', 'none')
+        NOT NULL DEFAULT 'none',
+
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_goal_daily_progress_goal_date (goal_id, progress_date),
+
+    CONSTRAINT fk_goal_daily_progress_goal
+        FOREIGN KEY (goal_id) REFERENCES saving_goals(goal_id)
+        ON DELETE CASCADE,
+
+    INDEX idx_goal_daily_progress_date (progress_date)
+) ENGINE=InnoDB;
+
+
+-- 10. Thêm các danh mục ban đầu
 INSERT IGNORE INTO categories (name, type) VALUES
     ('Ăn uống', 'expense'),
     ('Cà phê', 'expense'),
