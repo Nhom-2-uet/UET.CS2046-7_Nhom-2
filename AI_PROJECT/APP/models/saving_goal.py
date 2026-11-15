@@ -5,10 +5,10 @@ from typing import Literal
 
 GoalStatus = Literal[
     "active",
-    "completed",
     "paused",
-    "cancelled",
+    "finished",
     "failed",
+    "cancelled",
 ]
 
 

@@ -110,8 +110,9 @@ CREATE TABLE IF NOT EXISTS saving_goals (
     buffer_vnd BIGINT UNSIGNED NOT NULL DEFAULT 0,
 
     -- failed dùng khi hết hạn mà mục tiêu vẫn chưa hoàn thành
-    status ENUM('active', 'completed', 'paused', 'cancelled', 'failed')
+    status ENUM('active', 'paused', 'finished', 'failed', 'cancelled')
         NOT NULL DEFAULT 'active',
+
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_saving_goals_user

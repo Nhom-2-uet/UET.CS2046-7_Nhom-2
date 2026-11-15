@@ -34,7 +34,8 @@ PROGRESS_COLUMNS = """
     FROM saving_goal_daily_progress
 """
 
-ALLOWED_STATUSES = {"active", "completed", "paused", "cancelled", "failed"}
+ALLOWED_STATUSES = {"active", "paused", "finished", "failed", "cancelled"}
+TERMINAL_STATUSES = {"finished", "failed", "cancelled"}
 ALLOWED_SURPLUS_ACTIONS = {"to_goal", "to_buffer", "none"}
 
 
@@ -104,6 +105,29 @@ def _check_non_negative(value: int, name: str) -> None:
         raise ValueError(f"{name} phải là số nguyên không âm.")
 
 
+def _ensure_no_other_active_goal(
+    cursor: Any,
+    user_id: int,
+    exclude_goal_id: int | None = None,
+) -> None:
+    """Chặn tạo/kích hoạt mục tiêu nếu user đã có mục tiêu active khác."""
+    query = """
+        SELECT goal_id
+        FROM saving_goals
+        WHERE user_id = %s AND status = 'active'
+    """
+    parameters: list[Any] = [user_id]
+
+    if exclude_goal_id is not None:
+        query += " AND goal_id <> %s"
+        parameters.append(exclude_goal_id)
+
+    query += " LIMIT 1 FOR UPDATE"
+    cursor.execute(query, tuple(parameters))
+    if cursor.fetchone() is not None:
+        raise ValueError("Bạn đã có một kế hoạch tiết kiệm đang chạy.")
+
+
 # ---- (5. CREATE: CREATE A SAVING GOAL) ----
 def create_saving_goal(
     user_id: int,
@@ -121,6 +145,8 @@ def create_saving_goal(
         raise ValueError("deadline phải là ngày hợp lệ.")
 
     with _open_cursor() as cursor:
+        # Mỗi người dùng chỉ được có một mục tiêu đang chạy tại một thời điểm.
+        _ensure_no_other_active_goal(cursor, user_id)
         cursor.execute(
             """
             INSERT INTO saving_goals (
@@ -183,16 +209,13 @@ def get_saving_goals(
 def update_saving_goal_details(
     user_id: int,
     goal_id: int,
-    name: str,
     target_amount_vnd: int,
     deadline: date,
 ) -> SavingGoal | None:
-    """Sửa tên, số tiền mục tiêu, hạn hoàn thành; không tự đổi số dư."""
+    """Chỉ sửa số tiền mục tiêu và kỳ hạn; giữ nguyên tiến độ/quỹ đệm."""
     _check_positive(user_id, "user_id")
     _check_positive(goal_id, "goal_id")
     _check_positive(target_amount_vnd, "target_amount_vnd")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("Tên mục tiêu không được để trống.")
     if not isinstance(deadline, date):
         raise ValueError("deadline phải là ngày hợp lệ.")
 
@@ -200,10 +223,11 @@ def update_saving_goal_details(
         cursor.execute(
             """
             UPDATE saving_goals
-            SET name = %s, target_amount_vnd = %s, deadline = %s
+            SET target_amount_vnd = %s, deadline = %s
             WHERE goal_id = %s AND user_id = %s
+              AND status IN ('active', 'paused')
             """,
-            (name.strip(), target_amount_vnd, deadline, goal_id, user_id),
+            (target_amount_vnd, deadline, goal_id, user_id),
         )
         cursor.execute(
             GOAL_COLUMNS + " WHERE goal_id = %s AND user_id = %s",
@@ -225,6 +249,28 @@ def set_saving_goal_status(
         raise ValueError("Trạng thái mục tiêu không hợp lệ.")
 
     with _open_cursor() as cursor:
+        # Đọc và khóa kế hoạch để không thể mở lại mục tiêu đã kết thúc.
+        cursor.execute(
+            """
+            SELECT status
+            FROM saving_goals
+            WHERE goal_id = %s AND user_id = %s
+            FOR UPDATE
+            """,
+            (goal_id, user_id),
+        )
+        current_goal = cursor.fetchone()
+        if current_goal is None:
+            return None
+        if (
+            current_goal["status"] in TERMINAL_STATUSES
+            and status != current_goal["status"]
+        ):
+            raise ValueError("Kế hoạch đã kết thúc nên không thể đổi trạng thái.")
+
+        # Khi kích hoạt lại mục tiêu, không cho chạy song song với mục tiêu khác.
+        if status == "active":
+            _ensure_no_other_active_goal(cursor, user_id, exclude_goal_id=goal_id)
         cursor.execute(
             """
             UPDATE saving_goals
@@ -239,6 +285,15 @@ def set_saving_goal_status(
         )
         row = cursor.fetchone()
         return _row_to_goal(row) if row is not None else None
+
+
+def cancel_saving_goal(user_id: int, goal_id: int) -> SavingGoal | None:
+    """Hủy một mục tiêu đang chạy/tạm dừng; giữ nguyên tiến độ và lịch sử."""
+    return set_saving_goal_status(
+        user_id=user_id,
+        goal_id=goal_id,
+        status="cancelled",
+    )
 
 
 # ---- (8. SAVE DAILY RESULT: SAVE LOGIC'S CALCULATION) ----
