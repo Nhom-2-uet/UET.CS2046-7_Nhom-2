@@ -261,3 +261,52 @@ def delete_transaction(user_id: int, transaction_id: int) -> bool:
 
         # Bước 3: rowcount > 0 nghĩa là có ít nhất 1 dòng bị xóa
         return cursor.rowcount > 0
+# ---- (12. READ: LẤY GIAO DỊCH CHO PHẦN LOGIC) ----
+def get_transactions_for_logic(
+    user_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[dict[str, Any]]:
+    """Đọc giao dịch và trả về dữ liệu đúng định dạng cho các hàm logic."""
+
+    _check_positive(user_id, "user_id")
+
+    if start_date and end_date and start_date > end_date:
+        raise ValueError("start_date không được sau end_date.")
+
+    query = """
+        SELECT
+            t.amount_vnd AS amount,
+            t.transaction_type AS type,
+            c.name AS category,
+            t.transaction_date AS date
+        FROM transactions AS t
+        JOIN categories AS c
+            ON t.category_id = c.category_id
+        WHERE t.user_id = %s
+    """
+    parameters: list[Any] = [user_id]
+
+    if start_date is not None:
+        query += " AND t.transaction_date >= %s"
+        parameters.append(start_date)
+
+    if end_date is not None:
+        query += " AND t.transaction_date <= %s"
+        parameters.append(end_date)
+
+    query += " ORDER BY t.transaction_date DESC, t.transaction_id DESC"
+
+    with _open_cursor() as cursor:
+        cursor.execute(query, tuple(parameters))
+        rows = cursor.fetchall()
+
+    return [
+        {
+            "amount": row["amount"],
+            "type": row["type"],
+            "category": row["category"],
+            "date": row["date"],
+        }
+        for row in rows
+    ]
