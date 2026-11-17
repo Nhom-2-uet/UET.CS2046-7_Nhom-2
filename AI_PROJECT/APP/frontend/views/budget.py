@@ -1,10 +1,47 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from utils.formatting import format_vnd
+from utils.formatting import format_date, format_vnd
+
+
+EXPENSE_STATUS_LABELS = {
+    "unpaid": "Chưa thanh toán",
+    "paid": "Đã thanh toán",
+    "cancelled": "Đã hủy",
+}
+
+
+def _initial_required_expenses() -> list[dict]:
+    today = date.today()
+    return [
+        {
+            "expense_id": 1,
+            "name": "Tiền trọ",
+            "amount_vnd": 2_000_000,
+            "due_date": today + timedelta(days=5),
+            "status": "unpaid",
+            "paid_transaction_id": None,
+        },
+        {
+            "expense_id": 2,
+            "name": "Tiền điện nước",
+            "amount_vnd": 450_000,
+            "due_date": today + timedelta(days=10),
+            "status": "unpaid",
+            "paid_transaction_id": None,
+        },
+        {
+            "expense_id": 3,
+            "name": "Internet",
+            "amount_vnd": 200_000,
+            "due_date": today + timedelta(days=12),
+            "status": "unpaid",
+            "paid_transaction_id": None,
+        },
+    ]
 
 
 def render_budget() -> None:
@@ -15,6 +52,20 @@ def render_budget() -> None:
     st.session_state.setdefault("budget_settings_mock", None)
     st.session_state.setdefault("budget_monthly_input", 0)
     st.session_state.setdefault("budget_payday_input", 1)
+    if "budget_required_expenses_mock" not in st.session_state:
+        st.session_state["budget_required_expenses_mock"] = (
+            _initial_required_expenses()
+        )
+    st.session_state.setdefault(
+        "budget_required_expense_next_id",
+        max(
+            (
+                expense["expense_id"]
+                for expense in st.session_state["budget_required_expenses_mock"]
+            ),
+            default=0,
+        ) + 1,
+    )
     current_month = date.today().strftime("%Y-%m")
     spending_mock = st.session_state.get("budget_spending_mock")
     if spending_mock is None or spending_mock["month"] != current_month:
@@ -159,4 +210,187 @@ def render_budget() -> None:
 
     with st.container(border=True):
         st.subheader("Khoản chi bắt buộc")
-        st.info("Khu vực khoản chi bắt buộc sẽ được triển khai ở milestone tiếp theo.")
+        required_expenses = st.session_state["budget_required_expenses_mock"]
+        flash_message = st.session_state.pop(
+            "budget_required_expenses_flash", None
+        )
+        if flash_message is not None:
+            st.success(flash_message)
+
+        active_expenses = [
+            expense for expense in required_expenses
+            if expense["status"] != "cancelled"
+        ]
+        unpaid_expenses = [
+            expense for expense in required_expenses
+            if expense["status"] == "unpaid"
+        ]
+        total_active_amount = sum(
+            expense["amount_vnd"] for expense in active_expenses
+        )
+        total_unpaid_amount = sum(
+            expense["amount_vnd"] for expense in unpaid_expenses
+        )
+
+        count_col, amount_col, unpaid_col = st.columns(3)
+        count_col.metric("Tổng số khoản chi", len(required_expenses))
+        amount_col.metric(
+            "Tổng tiền (không gồm khoản đã hủy)",
+            format_vnd(total_active_amount),
+        )
+        unpaid_col.metric("Tổng tiền chưa thanh toán", format_vnd(total_unpaid_amount))
+
+        with st.expander("Thêm khoản chi bắt buộc", expanded=False):
+            with st.form("add_required_expense_form", clear_on_submit=True):
+                new_expense_name = st.text_input(
+                    "Tên khoản chi", max_chars=150
+                )
+                new_expense_amount = st.number_input(
+                    "Số tiền (VND)", min_value=0, step=10_000
+                )
+                new_expense_due_date = st.date_input(
+                    "Ngày đến hạn", value=date.today()
+                )
+                add_expense_submitted = st.form_submit_button("Thêm khoản chi")
+
+            if add_expense_submitted:
+                if not new_expense_name.strip():
+                    st.error("Vui lòng nhập tên khoản chi.")
+                elif new_expense_amount <= 0:
+                    st.error("Số tiền phải lớn hơn 0 VND.")
+                else:
+                    next_expense_id = st.session_state[
+                        "budget_required_expense_next_id"
+                    ]
+                    st.session_state["budget_required_expense_next_id"] += 1
+                    required_expenses.append(
+                        {
+                            "expense_id": next_expense_id,
+                            "name": new_expense_name.strip(),
+                            "amount_vnd": int(new_expense_amount),
+                            "due_date": new_expense_due_date,
+                            "status": "unpaid",
+                            "paid_transaction_id": None,
+                        }
+                    )
+                    st.session_state["budget_required_expenses_mock"] = (
+                        required_expenses
+                    )
+                    st.session_state["budget_required_expenses_flash"] = (
+                        "Đã thêm khoản chi bắt buộc."
+                    )
+                    st.rerun()
+
+        filter_options = {
+            "Tất cả": None,
+            "Chưa thanh toán": "unpaid",
+            "Đã thanh toán": "paid",
+            "Đã hủy": "cancelled",
+        }
+        selected_status_label = st.selectbox(
+            "Lọc theo trạng thái",
+            list(filter_options),
+            key="required_expense_status_filter",
+        )
+        selected_status = filter_options[selected_status_label]
+        filtered_expenses = [
+            expense for expense in required_expenses
+            if selected_status is None or expense["status"] == selected_status
+        ]
+
+        if filtered_expenses:
+            expense_table = pd.DataFrame(
+                [
+                    {
+                        "Tên khoản chi": expense["name"],
+                        "Số tiền (VND)": format_vnd(expense["amount_vnd"]),
+                        "Ngày đến hạn": format_date(expense["due_date"]),
+                        "Trạng thái": EXPENSE_STATUS_LABELS[expense["status"]],
+                        "Thao tác": (
+                            "Sửa / Xóa"
+                            if expense["status"] == "unpaid"
+                            else "Chỉ xem"
+                        ),
+                    }
+                    for expense in filtered_expenses
+                ]
+            )
+            st.dataframe(expense_table, hide_index=True, use_container_width=True)
+        else:
+            st.info("Không có khoản chi nào phù hợp với trạng thái đã chọn.")
+
+        editable_expenses = [
+            expense for expense in filtered_expenses
+            if expense["status"] == "unpaid"
+        ]
+        if editable_expenses:
+            with st.expander("Chỉnh sửa hoặc xóa khoản chưa thanh toán"):
+                editable_ids = [
+                    expense["expense_id"] for expense in editable_expenses
+                ]
+                selected_expense_id = st.selectbox(
+                    "Chọn khoản chi",
+                    editable_ids,
+                    format_func=lambda expense_id: next(
+                        expense["name"]
+                        for expense in editable_expenses
+                        if expense["expense_id"] == expense_id
+                    ),
+                    key=(
+                        "required_expense_action_"
+                        + "_".join(map(str, editable_ids))
+                    ),
+                )
+                selected_expense = next(
+                    expense for expense in editable_expenses
+                    if expense["expense_id"] == selected_expense_id
+                )
+
+                with st.form(f"edit_required_expense_{selected_expense_id}"):
+                    edited_name = st.text_input(
+                        "Tên khoản chi",
+                        value=selected_expense["name"],
+                        max_chars=150,
+                    )
+                    edited_amount = st.number_input(
+                        "Số tiền (VND)",
+                        min_value=0,
+                        value=int(selected_expense["amount_vnd"]),
+                        step=10_000,
+                    )
+                    edited_due_date = st.date_input(
+                        "Ngày đến hạn",
+                        value=selected_expense["due_date"],
+                    )
+                    edit_submitted = st.form_submit_button("Lưu thay đổi")
+
+                if edit_submitted:
+                    if not edited_name.strip():
+                        st.error("Tên khoản chi không được để trống.")
+                    elif edited_amount <= 0:
+                        st.error("Số tiền phải lớn hơn 0 VND.")
+                    else:
+                        selected_expense["name"] = edited_name.strip()
+                        selected_expense["amount_vnd"] = int(edited_amount)
+                        selected_expense["due_date"] = edited_due_date
+                        st.session_state["budget_required_expenses_mock"] = (
+                            required_expenses
+                        )
+                        st.session_state["budget_required_expenses_flash"] = (
+                            "Đã cập nhật khoản chi."
+                        )
+                        st.rerun()
+
+                if st.button(
+                    "Xóa khoản chi",
+                    key=f"delete_required_expense_{selected_expense_id}",
+                    type="secondary",
+                ):
+                    st.session_state["budget_required_expenses_mock"] = [
+                        expense for expense in required_expenses
+                        if expense["expense_id"] != selected_expense_id
+                    ]
+                    st.session_state["budget_required_expenses_flash"] = (
+                        "Đã xóa khoản chi."
+                    )
+                    st.rerun()
