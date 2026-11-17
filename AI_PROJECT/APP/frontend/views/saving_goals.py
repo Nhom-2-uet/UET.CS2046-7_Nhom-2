@@ -129,6 +129,29 @@ def render_saving_goals() -> None:
         )
         table.index.name = "Mock goal_id"
         st.dataframe(table, use_container_width=True)
+
+        st.subheader("Tiến độ mục tiêu")
+        for goal in filtered_goals:
+            target_amount_vnd = goal["target_amount_vnd"]
+            progress_vnd = goal.get("progress_vnd", 0)
+            buffer_vnd = goal.get("buffer_vnd", 0)
+            remaining_vnd = max(target_amount_vnd - progress_vnd, 0)
+            completion_percentage = progress_vnd / target_amount_vnd * 100
+            progress_bar_value = min(max(completion_percentage, 0), 100)
+
+            with st.container(border=True):
+                st.markdown(f"**{goal['name']}**")
+                target_col, progress_col, remaining_col = st.columns(3)
+                target_col.metric("Số tiền mục tiêu", format_vnd(target_amount_vnd))
+                progress_col.metric("Đã tích lũy", format_vnd(progress_vnd))
+                remaining_col.metric("Còn thiếu", format_vnd(remaining_vnd))
+
+                percentage_col, buffer_col = st.columns(2)
+                percentage_col.metric(
+                    "Hoàn thành", f"{completion_percentage:.1f}%"
+                )
+                buffer_col.metric("Số dư dự phòng", format_vnd(buffer_vnd))
+                st.progress(progress_bar_value / 100)
     else:
         st.info("Không có mục tiêu phù hợp với trạng thái đã chọn.")
 
