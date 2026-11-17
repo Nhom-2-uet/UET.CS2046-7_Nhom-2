@@ -4,6 +4,7 @@ import streamlit as st
 from views.dashboard import render_dashboard
 from views.transactions import render_transactions
 from views.ai_assistant import render_ai_assistant
+from views.budget import render_budget
 
 
 # 1. Cấu hình trang
@@ -36,8 +37,7 @@ elif selected_page == "AI Assistant":
     render_ai_assistant()
 
 elif selected_page == "Budget":
-    st.header("Quản lý ngân sách")
-    st.write("Theo dõi ngân sách của bạn.")
+    render_budget()
 
 elif selected_page == "Saving Goals":
     st.header("Mục tiêu tiết kiệm")
