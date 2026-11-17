@@ -3,6 +3,7 @@ import streamlit as st
 
 from views.dashboard import render_dashboard
 from views.transactions import render_transactions
+from views.ai_assistant import render_ai_assistant
 
 
 # 1. Cấu hình trang
@@ -32,8 +33,7 @@ elif selected_page == "Transactions":
     render_transactions()
 
 elif selected_page == "AI Assistant":
-    st.header("Trợ lý AI")
-    st.write("Khu vực tương tác với Gemini AI.")
+    render_ai_assistant()
 
 elif selected_page == "Budget":
     st.header("Quản lý ngân sách")
