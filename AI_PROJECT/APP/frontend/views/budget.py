@@ -1,5 +1,7 @@
 from datetime import date
 
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from utils.formatting import format_vnd
@@ -22,6 +24,20 @@ def render_budget() -> None:
                 {"description": "Khoản chi minh họa 1", "amount_vnd": 1_500_000},
                 {"description": "Khoản chi minh họa 2", "amount_vnd": 1_200_000},
                 {"description": "Khoản chi minh họa 3", "amount_vnd": 550_000},
+            ],
+        }
+    category_spending_mock = st.session_state.get(
+        "budget_category_spending_mock"
+    )
+    if category_spending_mock is None or category_spending_mock["month"] != current_month:
+        st.session_state["budget_category_spending_mock"] = {
+            "month": current_month,
+            "categories": [
+                {"category": "Ăn uống", "amount_vnd": 1_200_000},
+                {"category": "Đi lại", "amount_vnd": 600_000},
+                {"category": "Học tập", "amount_vnd": 800_000},
+                {"category": "Giải trí", "amount_vnd": 400_000},
+                {"category": "Khác", "amount_vnd": 250_000},
             ],
         }
 
@@ -96,7 +112,50 @@ def render_budget() -> None:
 
     with st.container(border=True):
         st.subheader("Chi tiêu theo danh mục")
-        st.info("Khu vực chi tiêu theo danh mục sẽ được triển khai ở milestone tiếp theo.")
+        category_data = pd.DataFrame(
+            st.session_state["budget_category_spending_mock"]["categories"]
+        )
+        total_category_spending = int(category_data["amount_vnd"].sum())
+        category_data["percentage"] = (
+            category_data["amount_vnd"] / total_category_spending * 100
+        )
+        highest_spending = category_data.loc[
+            category_data["amount_vnd"].idxmax()
+        ]
+
+        highest_col, total_col = st.columns(2)
+        highest_col.metric(
+            f"Chi tiêu cao nhất · {highest_spending['category']}",
+            format_vnd(int(highest_spending["amount_vnd"])),
+        )
+        total_col.metric(
+            "Tổng chi tiêu theo danh mục",
+            format_vnd(total_category_spending),
+        )
+
+        chart_col, table_col = st.columns(2)
+        with chart_col:
+            pie_chart = px.pie(
+                category_data,
+                names="category",
+                values="amount_vnd",
+                title="Tỷ trọng chi tiêu theo danh mục",
+                labels={"category": "Danh mục", "amount_vnd": "Số tiền"},
+            )
+            pie_chart.update_traces(textinfo="label+percent")
+            st.plotly_chart(pie_chart, use_container_width=True)
+
+        with table_col:
+            category_table = pd.DataFrame(
+                {
+                    "Danh mục": category_data["category"],
+                    "Số tiền": category_data["amount_vnd"].map(format_vnd),
+                    "Tỷ lệ": category_data["percentage"].map(
+                        lambda percentage: f"{percentage:.1f}%"
+                    ),
+                }
+            )
+            st.dataframe(category_table, hide_index=True, use_container_width=True)
 
     with st.container(border=True):
         st.subheader("Khoản chi bắt buộc")
