@@ -209,6 +209,19 @@ def mark_required_expense_paid(
 
         cursor.execute(
             """
+            SELECT expense_id
+            FROM required_expenses
+            WHERE paid_transaction_id = %s AND expense_id <> %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (paid_transaction_id, expense_id),
+        )
+        if cursor.fetchone() is not None:
+            raise ValueError("Giao dịch này đã được gắn với khoản chi bắt buộc khác.")
+
+        cursor.execute(
+            """
             UPDATE required_expenses
             SET status = 'paid', paid_transaction_id = %s
             WHERE user_id = %s AND expense_id = %s AND status = 'unpaid'

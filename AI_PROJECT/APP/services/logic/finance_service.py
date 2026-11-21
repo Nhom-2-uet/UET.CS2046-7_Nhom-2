@@ -127,8 +127,14 @@ class FinanceService:
 
      @classmethod
      def check_budget_status(cls, transactions, budget_limit, month, year):
+        if budget_limit < 0:
+            raise ValueError("Hạn mức ngân sách không được âm.")
         total_expense = cls.calculate_expense_by_period(transactions, month=month, year=year)
-        usage_percent = round((total_expense / budget_limit * 100), 2) if budget_limit > 0 else 0.0
+        usage_percent = (
+            round((total_expense / budget_limit * 100), 2)
+            if budget_limit > 0
+            else (100.0 if total_expense > 0 else 0.0)
+        )
         
         status = "NORMAL"
         if usage_percent >= 100:
@@ -160,12 +166,31 @@ class FinanceService:
         monthly.columns = ['year_month', 'amount']
         monthly['year_month'] = monthly['year_month'].astype(str)
 
-        # Tính % thay đổi liên tiếp và xử lý lỗi chia cho 0 (inf)
-        pct_change = monthly['amount'].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        monthly['pct_change'] = (pct_change * 100).round(2)
+        # Phần trăm không xác định khi tháng trước bằng 0 và tháng này dương.
+        # Giữ giá trị null cho trường hợp đó, nhưng vẫn xác định chiều theo số tiền.
+        pct_changes = [0.0]
+        for previous, current in zip(monthly['amount'][:-1], monthly['amount'][1:]):
+            pct_changes.append(
+                round((current - previous) / previous * 100, 2)
+                if previous > 0
+                else (0.0 if current == 0 else None)
+            )
+        monthly['pct_change'] = pct_changes
 
-        latest_change = float(monthly.iloc[-1]['pct_change']) if len(monthly) >= 2 else 0.0
-        direction = "INCREASING" if latest_change > 5 else ("DECREASING" if latest_change < -5 else "STABLE")
+        latest_change = monthly.iloc[-1]['pct_change'] if len(monthly) >= 2 else 0.0
+        if len(monthly) >= 2:
+            previous_amount = monthly.iloc[-2]['amount']
+            latest_amount = monthly.iloc[-1]['amount']
+            if previous_amount == 0 and latest_amount > 0:
+                direction = "INCREASING"
+            elif latest_change is not None and latest_change > 5:
+                direction = "INCREASING"
+            elif latest_change is not None and latest_change < -5:
+                direction = "DECREASING"
+            else:
+                direction = "STABLE"
+        else:
+            direction = "STABLE"
 
         return {
             "monthly_trend": monthly.to_dict(orient='records'),

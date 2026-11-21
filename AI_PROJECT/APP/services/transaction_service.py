@@ -89,6 +89,22 @@ def _validate_draft(user_id: int, draft: TransactionDraft) -> None:
         raise ValueError("Nguồn nhập phải là manual hoặc natural_language.")
 
 
+def _validate_category_type(cursor: Any, draft: TransactionDraft) -> None:
+    """Đảm bảo danh mục đang hoạt động và khớp loại giao dịch."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM categories
+        WHERE category_id = %s
+          AND type = %s
+          AND is_active = TRUE
+        """,
+        (draft.category_id, draft.transaction_type),
+    )
+    if cursor.fetchone() is None:
+        raise ValueError("Danh mục không tồn tại, đã bị khóa hoặc sai loại giao dịch.")
+
+
 # --- (6. HÀM PHỤ: ĐỌC 1 DÒNG THEO ID) ---
 def _fetch_row(cursor: Any, transaction_id: int, user_id: int) -> dict | None:
     """Đọc một dòng giao dịch theo transaction_id và user_id."""
@@ -109,6 +125,7 @@ def create_transaction(
     _validate_draft(user_id, draft)
 
     with _open_cursor() as cursor:
+        _validate_category_type(cursor, draft)
         # Bước 2: thêm dòng mới vào bảng
         cursor.execute(
             """
@@ -209,6 +226,7 @@ def update_transaction(
     _check_positive(transaction_id, "transaction_id")
 
     with _open_cursor() as cursor:
+        _validate_category_type(cursor, draft)
         # Bước 2: cập nhật dòng
         cursor.execute(
             """
@@ -283,7 +301,8 @@ def get_transactions_for_logic(
             t.amount_vnd AS amount,
             t.transaction_type AS type,
             c.name AS category,
-            t.transaction_date AS date
+            t.transaction_date AS date,
+            t.exclude_from_saving AS exclude_from_saving
         FROM transactions AS t
         JOIN categories AS c
             ON t.category_id = c.category_id
@@ -311,6 +330,7 @@ def get_transactions_for_logic(
             "type": row["type"],
             "category": row["category"],
             "date": row["date"],
+            "exclude_from_saving": bool(row["exclude_from_saving"]),
         }
         for row in rows
     ]

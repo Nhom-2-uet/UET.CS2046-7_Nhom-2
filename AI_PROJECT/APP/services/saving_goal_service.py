@@ -111,6 +111,14 @@ def _ensure_no_other_active_goal(
     exclude_goal_id: int | None = None,
 ) -> None:
     """Chặn tạo/kích hoạt mục tiêu nếu user đã có mục tiêu active khác."""
+    # Khóa hàng user để serialize các lần tạo/kích hoạt mục tiêu đồng thời.
+    cursor.execute(
+        "SELECT user_id FROM users WHERE user_id = %s FOR UPDATE",
+        (user_id,),
+    )
+    if cursor.fetchone() is None:
+        raise ValueError("Không tìm thấy người dùng.")
+
     query = """
         SELECT goal_id
         FROM saving_goals
@@ -249,6 +257,15 @@ def set_saving_goal_status(
         raise ValueError("Trạng thái mục tiêu không hợp lệ.")
 
     with _open_cursor() as cursor:
+        # Giữ cùng thứ tự khóa với create_saving_goal để tránh kích hoạt
+        # đồng thời hai mục tiêu của cùng user.
+        cursor.execute(
+            "SELECT user_id FROM users WHERE user_id = %s FOR UPDATE",
+            (user_id,),
+        )
+        if cursor.fetchone() is None:
+            raise ValueError("Không tìm thấy người dùng.")
+
         # Đọc và khóa kế hoạch để không thể mở lại mục tiêu đã kết thúc.
         cursor.execute(
             """

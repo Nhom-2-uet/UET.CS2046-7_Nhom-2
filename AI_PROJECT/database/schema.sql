@@ -9,8 +9,8 @@ USE chi_tieu_sinh_vien;
 CREATE TABLE IF NOT EXISTS users (
     user_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     display_name VARCHAR(100) NOT NULL,
-    username VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    username VARCHAR(100) NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS categories (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
 
     -- Không cho tạo trùng tên danh mục trong cùng loại thu hoặc chi
-    UNIQUE KEY uq_categories_name_type (name, type)
+    UNIQUE KEY uq_categories_name_type (name, type),
+    UNIQUE KEY uq_categories_id_type (category_id, type)
 ) ENGINE=InnoDB;
 
 -- 4. Giao dịch thu chi
@@ -45,8 +46,9 @@ CREATE TABLE IF NOT EXISTS transactions (
         FOREIGN KEY (user_id) REFERENCES users(user_id)
         ON DELETE CASCADE,
 
-    CONSTRAINT fk_transactions_category
-        FOREIGN KEY (category_id) REFERENCES categories(category_id)
+    CONSTRAINT fk_transactions_category_type
+        FOREIGN KEY (category_id, transaction_type)
+        REFERENCES categories(category_id, type)
         ON DELETE RESTRICT,
 
     INDEX idx_transactions_user_date (user_id, transaction_date),
@@ -94,7 +96,8 @@ CREATE TABLE IF NOT EXISTS required_expenses (
         REFERENCES transactions(transaction_id)
         ON DELETE SET NULL,
 
-    INDEX idx_required_expenses_user_due (user_id, due_date)
+    INDEX idx_required_expenses_user_due (user_id, due_date),
+    UNIQUE KEY uq_required_expenses_paid_transaction (paid_transaction_id)
 ) ENGINE=InnoDB;
 
 
