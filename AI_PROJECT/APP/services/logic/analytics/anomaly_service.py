@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
-from services.logic.finance_service import FinanceService
+from services.logic.analytics.finance_service import FinanceService
 
 
 class AnomalyService:

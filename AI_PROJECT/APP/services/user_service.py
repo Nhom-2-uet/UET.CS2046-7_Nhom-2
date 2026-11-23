@@ -37,7 +37,7 @@ def _open_cursor() -> Iterator[Any]:
 
 # ---- (3. CHUYỂN DÒNG DATABASE THÀNH MODEL) ----
 def _row_to_user(row: dict[str, Any]) -> User:
-    # Không đưa password_hash vào model trả cho phần còn lại của ứng dụng.
+    """Chuyển một dòng database thành model User, không đưa password hash ra ngoài."""
     return User(
         user_id=row["user_id"],
         display_name=row["display_name"],

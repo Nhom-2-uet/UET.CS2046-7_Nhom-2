@@ -1,12 +1,11 @@
 """Các thao tác CRUD cho giao dịch trong database."""
 
 # --- (1. IMPORT THƯ VIỆN) ---
-from contextlib import contextmanager
 from datetime import date
-from typing import Any, Iterator
+from typing import Any
 
 from APP.models.transaction import Transaction, TransactionDraft
-from database.connection import get_connection
+from services.logic.repositories._db import open_cursor as _open_cursor
 
 
 # --- (2. CÂU SQL DÙNG CHUNG) ---
@@ -23,34 +22,9 @@ SELECT_COLUMNS = """
 """
 
 
-# --- (3. MỞ KẾT NỐI VÀ CURSOR) ---
-@contextmanager
-def _open_cursor() -> Iterator[Any]:
-    """Mở kết nối và cursor.
-
-    - Chạy xong không lỗi  -> commit (lưu thay đổi)
-    - Có lỗi               -> rollback (hủy thay đổi)
-    - Dù thế nào           -> đóng cursor và kết nối
-    """
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        yield cursor          # trả cursor cho hàm bên ngoài dùng
-        connection.commit()   # hàm bên ngoài chạy xong -> lưu
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
-
-
 # --- (4. CHUYỂN DÒNG DATABASE THÀNH OBJECT) ---
-def _row_to_transaction(row: dict) -> Transaction:
-    """Chuyển một dòng MySQL thành đối tượng Transaction của Python."""
+def _row_to_transaction(row: dict[str, Any]) -> Transaction:
+    """Chuyển một dòng database thành model Transaction."""
     return Transaction(
         transaction_id=row["transaction_id"],
         user_id=row["user_id"],
@@ -103,6 +77,32 @@ def _validate_category_type(cursor: Any, draft: TransactionDraft) -> None:
     )
     if cursor.fetchone() is None:
         raise ValueError("Danh mục không tồn tại, đã bị khóa hoặc sai loại giao dịch.")
+
+
+def get_category_id(category_name: str, transaction_type: str) -> int:
+    """Tìm danh mục đang hoạt động theo tên và loại giao dịch."""
+    if not isinstance(category_name, str) or not category_name.strip():
+        raise ValueError("Tên danh mục không được để trống.")
+    if transaction_type not in {"income", "expense"}:
+        raise ValueError("Loại giao dịch phải là income hoặc expense.")
+
+    with _open_cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT category_id
+            FROM categories
+            WHERE name = %s AND type = %s AND is_active = TRUE
+            """,
+            (category_name.strip(), transaction_type),
+        )
+        row = cursor.fetchone()
+
+    if row is None:
+        raise ValueError(
+            f"Không tìm thấy danh mục '{category_name}' "
+            f"cho loại giao dịch '{transaction_type}'."
+        )
+    return int(row["category_id"])
 
 
 # --- (6. HÀM PHỤ: ĐỌC 1 DÒNG THEO ID) ---
