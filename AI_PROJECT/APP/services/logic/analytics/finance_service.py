@@ -189,14 +189,20 @@ class FinanceService:
 
         # Phần trăm không xác định khi tháng trước bằng 0 và tháng này dương.
         # Giữ giá trị null cho trường hợp đó, nhưng vẫn xác định chiều theo số tiền.
-        pct_changes = [0.0]
-        for previous, current in zip(monthly['amount'][:-1], monthly['amount'][1:]):
-            pct_changes.append(
-                round((current - previous) / previous * 100, 2)
-                if previous > 0
-                else (0.0 if current == 0 else None)
-            )
-        monthly['pct_change'] = pct_changes
+        pct_changes: list[float | None] = [0.0]
+        amounts = [float(amount) for amount in monthly['amount'].tolist()]
+        for previous, current in zip(amounts[:-1], amounts[1:]):
+            pct_change: float | None
+            if previous > 0:
+                pct_change = round((current - previous) / previous * 100, 2)
+            elif current == 0:
+                pct_change = 0.0
+            else:
+                pct_change = None
+            pct_changes.append(pct_change)
+        monthly['pct_change'] = pd.Series(
+            pct_changes, index=monthly.index, dtype=object
+        )
 
         latest_change = monthly.iloc[-1]['pct_change'] if len(monthly) >= 2 else 0.0
         if len(monthly) >= 2:
