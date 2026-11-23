@@ -65,6 +65,17 @@ class FinanceService:
             mask &= (df['date'].dt.year == year)
          return df.loc[mask]
 
+     @staticmethod
+     def _expense_category_amounts(exp_df):
+        if exp_df.empty:
+            return []
+        grouped = (
+            exp_df.groupby('category', as_index=False)['amount']
+            .sum()
+            .sort_values(by='amount', ascending=False)
+        )
+        return grouped.to_dict(orient='records')
+
      @classmethod
      def calculate_total_income(cls, transactions, month, year):
         df = cls._prepare_df(transactions)
@@ -97,16 +108,34 @@ class FinanceService:
         if total_exp == 0:
             return {"total_expense": 0.0, "categories": []}
 
-        grouped = (
-            exp_df.groupby('category', as_index=False)['amount']
-            .sum()
-            .sort_values(by='amount', ascending=False)
-        )
-        grouped['percentage'] = (grouped['amount'] / total_exp * 100).round(2)
+        categories = cls._expense_category_amounts(exp_df)
+        for item in categories:
+            item['percentage'] = round(item['amount'] / total_exp * 100, 2)
 
         return {
             "total_expense": round(total_exp, 2),
-            "categories": grouped.to_dict(orient='records')
+            "categories": categories
+        }
+
+     @classmethod
+     def summarize_transactions(cls, transactions):
+        """Tổng hợp thu, chi và chi theo danh mục trên toàn bộ danh sách đầu vào."""
+        df = cls._prepare_df(transactions)
+        income_total = float(df.loc[df['type'] == 'income', 'amount'].sum())
+        expense_df = df.loc[df['type'] == 'expense']
+        expense_total = float(expense_df['amount'].sum())
+        category_amounts = cls._expense_category_amounts(expense_df)
+
+        return {
+            "summary": {
+                "total_income": round(income_total, 2),
+                "total_expense": round(expense_total, 2),
+                "net_balance": round(income_total - expense_total, 2),
+            },
+            "categories": {
+                "total_expense": round(expense_total, 2),
+                "categories": category_amounts,
+            },
         }
 
      @classmethod

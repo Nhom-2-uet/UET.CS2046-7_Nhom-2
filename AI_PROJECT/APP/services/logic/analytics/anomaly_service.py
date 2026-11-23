@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Any, Dict, List, cast
 from services.logic.analytics.finance_service import FinanceService
 
 
@@ -46,4 +46,6 @@ class AnomalyService:
             & (exp_df['amount'] >= exp_df['mean'] * multiplier_threshold)
         ].copy()
 
-        return unusual.to_dict(orient='records')
+        # Các cột của DataFrame này đều là tên chuỗi; pandas-stubs khai báo
+        # key tổng quát là Hashable nên cần thu hẹp kiểu trả về tại đây.
+        return cast(List[Dict[str, Any]], unusual.to_dict(orient="records"))
