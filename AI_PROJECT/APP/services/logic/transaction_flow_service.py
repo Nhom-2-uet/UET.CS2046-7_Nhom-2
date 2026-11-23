@@ -4,7 +4,7 @@
 from datetime import date
 
 from APP.models.transaction import Transaction, TransactionDraft
-from APP.services.transaction_service import create_transaction
+from AI_PROJECT.APP.services.logic.transaction_service import create_transaction
 from database.connection import get_connection
 
 #----2.TÌM DANH MUC TRONG DB----
