@@ -94,23 +94,6 @@ def execute(command: str, data: dict[str, Any]) -> Any:
         start_date = data.get("start_date")
         end_date = data.get("end_date")
         records = list_transactions(user_id, start_date, end_date)
-        total_income = sum(item.amount_vnd for item in records if item.transaction_type == "income")
-        total_expense = sum(item.amount_vnd for item in records if item.transaction_type == "expense")
-        category_totals: dict[str, int] = {}
-        for item in records:
-            if item.transaction_type == "expense":
-                category_totals[item.category_name] = category_totals.get(item.category_name, 0) + item.amount_vnd
-        summary = {
-            "total_income": total_income,
-            "total_expense": total_expense,
-            "net_balance": total_income - total_expense,
-        }
-        categories = {
-            "total_expense": total_expense,
-            "categories": [
-                {"category": name, "amount": amount}
-                for name, amount in sorted(category_totals.items(), key=lambda pair: pair[1], reverse=True)
-            ],
-        }
-        return {"transactions": records, "summary": summary, "categories": categories}
+        summary = FinanceService.summarize_transactions(records)
+        return {"transactions": records, **summary}
     raise ValueError(f"Lệnh không được hỗ trợ: {command}")

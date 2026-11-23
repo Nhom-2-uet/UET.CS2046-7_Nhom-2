@@ -4,35 +4,14 @@
 import hashlib
 import hmac
 import secrets
-from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from APP.models.user import User
-from database.connection import get_connection
+from services.logic.repositories import user_repository
 
 
 _PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
 _PASSWORD_HASH_ITERATIONS = 600_000
-
-
-# ---- (2. MỞ KẾT NỐI VÀ CURSOR) ----
-@contextmanager
-def _open_cursor() -> Iterator[Any]:
-    """Commit khi thành công, rollback khi lỗi, rồi luôn đóng kết nối."""
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        yield cursor
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
 
 
 # ---- (3. CHUYỂN DÒNG DATABASE THÀNH MODEL) ----
@@ -44,18 +23,6 @@ def _row_to_user(row: dict[str, Any]) -> User:
         created_at=row["created_at"],
         username=row["username"],
     )
-
-
-def _fetch_user_by_id(cursor: Any, user_id: int) -> dict[str, Any] | None:
-    cursor.execute(
-        """
-        SELECT user_id, display_name, username, created_at
-        FROM users
-        WHERE user_id = %s
-        """,
-        (user_id,),
-    )
-    return cursor.fetchone()
 
 
 # ---- (4. KIỂM TRA VÀ BĂM MẬT KHẨU) ----
@@ -123,18 +90,10 @@ def create_user(username: str, password: str, display_name: str) -> User:
         raise ValueError("Tên hiển thị không được dài quá 100 ký tự.")
 
     password_hash = _hash_password(password)
-    with _open_cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO users (display_name, username, password_hash)
-            VALUES (%s, %s, %s)
-            """,
-            (display_name.strip(), username, password_hash),
-        )
-        row = _fetch_user_by_id(cursor, cursor.lastrowid)
-        if row is None:
-            raise RuntimeError("Không đọc lại được tài khoản vừa tạo.")
-        return _row_to_user(row)
+    row = user_repository.create_user_record(
+        display_name.strip(), username, password_hash
+    )
+    return _row_to_user(row)
 
 
 # ---- (5B. GẮN THÔNG TIN ĐĂNG NHẬP VÀO HỒ SƠ CŨ) ----
@@ -148,24 +107,16 @@ def add_login_to_existing_user(
     username = _clean_username(username)
     _check_password(password)
 
-    with _open_cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE users
-            SET username = %s, password_hash = %s
-            WHERE user_id = %s AND username IS NULL AND password_hash IS NULL
-            """,
-            (username, _hash_password(password), user_id),
-        )
-        row = _fetch_user_by_id(cursor, user_id)
+    row = user_repository.add_login_to_user_record(
+        user_id, username, _hash_password(password)
+    )
     return _row_to_user(row) if row is not None and row["username"] else None
 
 
 # ---- (6. READ: ĐỌC HỒ SƠ USER) ----
 def get_user(user_id: int) -> User | None:
     _check_positive_id(user_id)
-    with _open_cursor() as cursor:
-        row = _fetch_user_by_id(cursor, user_id)
+    row = user_repository.get_user_record(user_id)
     return _row_to_user(row) if row is not None else None
 
 
@@ -176,16 +127,7 @@ def authenticate_user(username: str, password: str) -> User | None:
     if not isinstance(password, str):
         return None
 
-    with _open_cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT user_id, display_name, username, password_hash, created_at
-            FROM users
-            WHERE username = %s
-            """,
-            (username,),
-        )
-        row = cursor.fetchone()
+    row = user_repository.get_user_auth_record(username)
 
     if row is None or not _password_matches(password, row["password_hash"]):
         return None
@@ -200,12 +142,7 @@ def update_display_name(user_id: int, display_name: str) -> User | None:
     if len(display_name.strip()) > 100:
         raise ValueError("Tên hiển thị không được dài quá 100 ký tự.")
 
-    with _open_cursor() as cursor:
-        cursor.execute(
-            "UPDATE users SET display_name = %s WHERE user_id = %s",
-            (display_name.strip(), user_id),
-        )
-        row = _fetch_user_by_id(cursor, user_id)
+    row = user_repository.update_user_display_name(user_id, display_name.strip())
     return _row_to_user(row) if row is not None else None
 
 
@@ -217,17 +154,12 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
         return False
     _check_password(new_password)
 
-    with _open_cursor() as cursor:
-        cursor.execute(
-            "SELECT password_hash FROM users WHERE user_id = %s",
-            (user_id,),
-        )
-        row = cursor.fetchone()
-        if row is None or not _password_matches(old_password, row["password_hash"]):
-            return False
+    current_hash = user_repository.get_user_password_hash(user_id)
+    if current_hash is None or not _password_matches(old_password, current_hash):
+        return False
 
-        cursor.execute(
-            "UPDATE users SET password_hash = %s WHERE user_id = %s",
-            (_hash_password(new_password), user_id),
-        )
-        return cursor.rowcount == 1
+    return user_repository.update_user_password_hash(
+        user_id,
+        expected_password_hash=current_hash,
+        new_password_hash=_hash_password(new_password),
+    )
