@@ -1,319 +1,194 @@
-from datetime import date, datetime
-from uuid import uuid4
+from datetime import date
 
 import pandas as pd
 import streamlit as st
+
+from frontend.api_client import request
 
 
 TYPE_LABELS = {"expense": "Chi tiêu", "income": "Thu nhập"}
 TYPE_VALUES = {label: value for value, label in TYPE_LABELS.items()}
 
 
-def _mock_record(
-    transaction_date: date,
-    description: str,
-    category_name: str,
-    transaction_type: str,
-    amount_vnd: int,
-) -> dict:
-    """Create a UI mock record using Backend-aligned field names."""
-    return {
-        "transaction_id": pd.NA,
-        "mock_id": str(uuid4()),
-        "transaction_date": transaction_date,
-        "description": description,
-        "category_name": category_name,
-        "transaction_type": transaction_type,
-        "amount_vnd": amount_vnd,
-    }
-
-
-def _mock_transactions() -> pd.DataFrame:
-    records = [
-        _mock_record(date(2026, 11, 10), "Ăn trưa", "Ăn uống", "expense", 35000),
-        _mock_record(date(2026, 11, 9), "Tiền làm thêm", "Thu nhập", "income", 1500000),
-        _mock_record(date(2026, 11, 8), "Mua sách", "Học tập", "expense", 120000),
-        _mock_record(date(2026, 11, 7), "Đi xe bus", "Đi lại", "expense", 7000),
-        _mock_record(date(2026, 11, 6), "Xem phim", "Giải trí", "expense", 80000),
-    ]
-    transactions = pd.DataFrame(records)
-    transactions["transaction_id"] = pd.array(
-        transactions["transaction_id"], dtype="Int64"
-    )
-    return transactions
-
-
-def _migrate_legacy_session_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
-    """Keep records from an already-open session after the UI schema changes."""
-    records = [
-        _mock_record(
-            transaction_date=datetime.strptime(row["Ngày"], "%d/%m/%Y").date(),
-            description=row["Tên giao dịch"],
-            category_name=row["Danh mục"],
-            transaction_type=TYPE_VALUES[row["Loại"]],
-            amount_vnd=int(row["Số tiền"]),
-        )
-        for _, row in transactions.iterrows()
-    ]
-    if not records:
-        return pd.DataFrame(
-            {
-                "transaction_id": pd.Series(dtype="Int64"),
-                "mock_id": pd.Series(dtype="object"),
-                "transaction_date": pd.Series(dtype="object"),
-                "description": pd.Series(dtype="object"),
-                "category_name": pd.Series(dtype="object"),
-                "transaction_type": pd.Series(dtype="object"),
-                "amount_vnd": pd.Series(dtype="int64"),
-            }
-        )
-    migrated = pd.DataFrame(records)
-    migrated["transaction_id"] = pd.array(
-        migrated["transaction_id"], dtype="Int64"
-    )
-    return migrated
-
-
 def _format_vnd(amount: int) -> str:
     return f"{amount:,.0f} đ".replace(",", ".")
 
 
-def _format_transaction_option(row: pd.Series, include_amount: bool = False) -> str:
-    label = f"{row['transaction_date'].strftime('%d/%m/%Y')} - {row['description']}"
-    if include_amount:
-        label += f" - {row['amount_vnd']:,} đ"
-    return label
+def _record_dict(record) -> dict:
+    return {
+        "transaction_id": record.transaction_id,
+        "transaction_date": record.transaction_date,
+        "description": record.description or "",
+        "category_name": record.category_name,
+        "transaction_type": record.transaction_type,
+        "amount_vnd": record.amount_vnd,
+    }
 
 
-def _get_record(transactions: pd.DataFrame, mock_id: str) -> pd.Series:
-    return transactions.loc[transactions["mock_id"] == mock_id].iloc[0]
-
-
-def _display_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
-    """Build display-only labels without changing the underlying records."""
-    return pd.DataFrame(
-        {
-            "Ngày": transactions["transaction_date"].map(
-                lambda value: value.strftime("%d/%m/%Y")
-            ),
-            "Tên giao dịch": transactions["description"],
-            "Danh mục": transactions["category_name"],
-            "Loại": transactions["transaction_type"].map(TYPE_LABELS),
-            "Số tiền": transactions["amount_vnd"].map(_format_vnd),
-        }
-    )
+def _load_categories(transaction_type: str) -> list[str]:
+    return [
+        row["name"]
+        for row in request(
+            "transaction.categories", {"transaction_type": transaction_type}
+        )
+    ]
 
 
 def render_transactions() -> None:
-    """Render transaction management using session-local mock data."""
     st.header("Quản lý giao dịch")
-    st.caption("Theo dõi và quản lý các khoản thu chi của bạn.")
+    st.caption("Giao dịch được tải và lưu trực tiếp qua backend.")
 
-    if "transactions" not in st.session_state:
-        st.session_state.transactions = _mock_transactions()
-    elif "mock_id" not in st.session_state.transactions.columns:
-        st.session_state.transactions = _migrate_legacy_session_transactions(
-            st.session_state.transactions
-        )
+    add_col, refresh_col = st.columns([4, 1])
+    with add_col:
+        st.subheader("Thêm giao dịch")
+    with refresh_col:
+        if st.button("Làm mới", use_container_width=True):
+            st.rerun()
 
     with st.expander("➕ Thêm giao dịch mới", expanded=False):
         transaction_type_label = st.selectbox(
-            "Loại giao dịch",
-            ["Chi tiêu", "Thu nhập"],
-            key="new_transaction_type",
+            "Loại giao dịch", list(TYPE_VALUES), key="new_transaction_type"
         )
-
-        if transaction_type_label == "Chi tiêu":
-            category_options = [
-                "Ăn uống", "Đi lại", "Học tập", "Giải trí", "Mua sắm", "Khác"
-            ]
-        else:
-            category_options = ["Lương", "Làm thêm", "Thưởng", "Thu nhập khác"]
+        transaction_type = TYPE_VALUES[transaction_type_label]
+        try:
+            categories = _load_categories(transaction_type)
+        except Exception as error:
+            st.error(f"Không tải được danh mục: {error}")
+            categories = []
+        if not categories:
+            st.warning("Chưa có danh mục đang hoạt động cho loại giao dịch này.")
 
         with st.form("add_transaction_form"):
-            transaction_name = st.text_input(
-                "Tên giao dịch",
-                placeholder="Ví dụ: Ăn sáng, mua sách...",
-            )
-            transaction_amount = st.number_input(
-                "Số tiền (VND)", min_value=0, step=1000
-            )
-            transaction_date = st.date_input(
-                "Ngày giao dịch", value=date.today()
-            )
-            transaction_category = st.selectbox(
-                "Danh mục",
-                category_options,
-                key="new_transaction_category",
-            )
+            name = st.text_input("Tên giao dịch", placeholder="Ví dụ: Ăn sáng")
+            amount = st.number_input("Số tiền (VND)", min_value=0, step=1000)
+            transaction_date = st.date_input("Ngày giao dịch", value=date.today())
+            category = st.selectbox("Danh mục", categories, disabled=not categories)
             submitted = st.form_submit_button(
-                "Thêm giao dịch", width="stretch"
+                "Thêm giao dịch", disabled=not categories, width="stretch"
             )
+        if submitted:
+            try:
+                with st.spinner("Đang lưu giao dịch..."):
+                    request(
+                        "transaction.create",
+                        {
+                            "description": name,
+                            "amount_vnd": int(amount),
+                            "transaction_date": transaction_date,
+                            "category_name": category,
+                            "transaction_type": transaction_type,
+                        },
+                    )
+                st.success("Đã thêm giao dịch.")
+                st.rerun()
+            except Exception as error:
+                st.error(f"Không thể thêm giao dịch: {error}")
 
-            if submitted:
-                if not transaction_name.strip():
-                    st.error("Vui lòng nhập tên giao dịch.")
-                elif transaction_amount <= 0:
-                    st.error("Số tiền phải lớn hơn 0.")
-                else:
-                    new_record = _mock_record(
-                        transaction_date=transaction_date,
-                        description=transaction_name.strip(),
-                        category_name=transaction_category,
-                        transaction_type=TYPE_VALUES[transaction_type_label],
-                        amount_vnd=int(transaction_amount),
-                    )
-                    st.session_state.transactions = pd.concat(
-                        [
-                            st.session_state.transactions,
-                            pd.DataFrame([new_record]),
-                        ],
-                        ignore_index=True,
-                    )
-                    st.session_state.transactions["transaction_id"] = pd.array(
-                        st.session_state.transactions["transaction_id"],
-                        dtype="Int64",
-                    )
-                    st.success("Thêm giao dịch thành công!")
+    try:
+        with st.spinner("Đang tải giao dịch..."):
+            records = request("transaction.list")
+    except Exception as error:
+        st.error(f"Không tải được danh sách giao dịch: {error}")
+        return
 
-    transaction_data = st.session_state.transactions.copy()
+    transactions = pd.DataFrame([_record_dict(row) for row in records])
     st.subheader("Lịch sử giao dịch")
+    if transactions.empty:
+        st.info("Chưa có giao dịch nào.")
+        return
 
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
-    with filter_col1:
-        search_text = st.text_input(
-            "Tìm kiếm giao dịch", placeholder="Nhập tên giao dịch..."
-        )
-    with filter_col2:
-        selected_type_label = st.selectbox(
-            "Loại giao dịch", ["Tất cả", "Thu nhập", "Chi tiêu"]
-        )
-    with filter_col3:
-        categories = ["Tất cả"] + transaction_data["category_name"].unique().tolist()
-        selected_category = st.selectbox("Danh mục", categories)
+    col_search, col_type, col_category = st.columns(3)
+    search = col_search.text_input("Tìm kiếm", placeholder="Tên giao dịch")
+    type_label = col_type.selectbox("Loại giao dịch", ["Tất cả", *TYPE_VALUES])
+    category_name = col_category.selectbox(
+        "Danh mục", ["Tất cả", *sorted(transactions["category_name"].unique())]
+    )
 
-    filtered_data = transaction_data.copy()
-    if search_text:
-        filtered_data = filtered_data[
-            filtered_data["description"].str.contains(
-                search_text, case=False, na=False
+    filtered = transactions.copy()
+    if search:
+        filtered = filtered[filtered["description"].str.contains(search, case=False, na=False)]
+    if type_label != "Tất cả":
+        filtered = filtered[filtered["transaction_type"] == TYPE_VALUES[type_label]]
+    if category_name != "Tất cả":
+        filtered = filtered[filtered["category_name"] == category_name]
+
+    display = filtered.copy()
+    display["Ngày"] = display["transaction_date"].map(lambda value: value.strftime("%d/%m/%Y"))
+    display["Loại"] = display["transaction_type"].map(TYPE_LABELS)
+    display["Số tiền"] = display["amount_vnd"].map(_format_vnd)
+    st.dataframe(
+        display[["Ngày", "description", "category_name", "Loại", "Số tiền"]].rename(
+            columns={"description": "Tên giao dịch", "category_name": "Danh mục"}
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.caption(f"Tìm thấy {len(filtered)} giao dịch.")
+
+    transaction_ids = filtered["transaction_id"].astype(int).tolist()
+    if not transaction_ids:
+        return
+    selected_id = st.selectbox("Chọn giao dịch để sửa hoặc xóa", transaction_ids)
+    selected = transactions.loc[transactions["transaction_id"] == selected_id].iloc[0]
+    with st.expander("✏️ Chỉnh sửa giao dịch"):
+        current_type = selected["transaction_type"]
+        edit_type_label = st.selectbox(
+            "Loại giao dịch", list(TYPE_VALUES),
+            index=list(TYPE_VALUES.values()).index(current_type),
+            key=f"edit_type_{selected_id}",
+        )
+        edit_type = TYPE_VALUES[edit_type_label]
+        try:
+            edit_categories = _load_categories(edit_type)
+        except Exception as error:
+            st.error(f"Không tải được danh mục: {error}")
+            edit_categories = []
+        if selected["category_name"] not in edit_categories:
+            edit_categories.append(selected["category_name"])
+        with st.form(f"edit_transaction_{selected_id}"):
+            edit_name = st.text_input("Tên giao dịch", value=selected["description"])
+            edit_amount = st.number_input(
+                "Số tiền (VND)", min_value=0, value=int(selected["amount_vnd"]), step=1000
             )
-        ]
-    if selected_type_label != "Tất cả":
-        selected_type = TYPE_VALUES[selected_type_label]
-        filtered_data = filtered_data[
-            filtered_data["transaction_type"] == selected_type
-        ]
-    if selected_category != "Tất cả":
-        filtered_data = filtered_data[
-            filtered_data["category_name"] == selected_category
-        ]
-
-    st.dataframe(_display_transactions(filtered_data), width="stretch", hide_index=True)
-    st.caption(f"Tìm thấy {len(filtered_data)} giao dịch.")
+            edit_date = st.date_input("Ngày giao dịch", value=selected["transaction_date"])
+            edit_category = st.selectbox(
+                "Danh mục", edit_categories, key=f"edit_category_{selected_id}"
+            )
+            save = st.form_submit_button("Lưu thay đổi")
+        if save:
+            try:
+                with st.spinner("Đang cập nhật giao dịch..."):
+                    updated = request(
+                        "transaction.update",
+                        {
+                            "transaction_id": int(selected_id),
+                            "description": edit_name,
+                            "amount_vnd": int(edit_amount),
+                            "transaction_date": edit_date,
+                            "category_name": edit_category,
+                            "transaction_type": edit_type,
+                        },
+                    )
+                if updated is None:
+                    st.error("Không tìm thấy giao dịch để cập nhật.")
+                else:
+                    st.success("Đã cập nhật giao dịch.")
+                    st.rerun()
+            except Exception as error:
+                st.error(f"Không thể cập nhật giao dịch: {error}")
 
     with st.expander("🗑️ Xóa giao dịch"):
-        if filtered_data.empty:
-            st.info("Không có giao dịch để xóa.")
-        else:
-            selected_delete_id = st.selectbox(
-                "Chọn giao dịch cần xóa",
-                filtered_data["mock_id"].tolist(),
-                format_func=lambda mock_id: _format_transaction_option(
-                    _get_record(transaction_data, mock_id), include_amount=True
-                ),
-                key="delete_transaction_selector",
-            )
-            if st.button("Xóa giao dịch", type="primary"):
-                st.session_state.transactions = (
-                    st.session_state.transactions.loc[
-                        st.session_state.transactions["mock_id"] != selected_delete_id
-                    ].reset_index(drop=True)
-                )
-                st.success("Đã xóa giao dịch thành công!")
-                st.rerun()
-
-    with st.expander("✏️ Chỉnh sửa giao dịch"):
-        if transaction_data.empty:
-            st.info("Chưa có giao dịch để chỉnh sửa.")
-        else:
-            selected_edit_id = st.selectbox(
-                "Chọn giao dịch cần chỉnh sửa",
-                transaction_data["mock_id"].tolist(),
-                format_func=lambda mock_id: _format_transaction_option(
-                    _get_record(transaction_data, mock_id)
-                ),
-                key="edit_transaction_selector_v2",
-            )
-            current_transaction = _get_record(transaction_data, selected_edit_id)
-            record_mask = (
-                st.session_state.transactions["mock_id"] == selected_edit_id
-            )
-
-            st.write("**Chỉnh sửa thông tin giao dịch**")
-            edit_name = st.text_input(
-                "Tên giao dịch",
-                value=current_transaction["description"],
-                key=f"edit_name_{selected_edit_id}",
-            )
-            edit_amount = st.number_input(
-                "Số tiền (VND)",
-                min_value=0,
-                value=int(current_transaction["amount_vnd"]),
-                step=1000,
-                key=f"edit_amount_{selected_edit_id}",
-            )
-            edit_date = st.date_input(
-                "Ngày giao dịch",
-                value=current_transaction["transaction_date"],
-                key=f"edit_date_{selected_edit_id}",
-            )
-            current_type_label = TYPE_LABELS[current_transaction["transaction_type"]]
-            edit_type_label = st.selectbox(
-                "Loại giao dịch",
-                ["Chi tiêu", "Thu nhập"],
-                index=["Chi tiêu", "Thu nhập"].index(current_type_label),
-                key=f"edit_type_{selected_edit_id}",
-            )
-
-            if edit_type_label == "Chi tiêu":
-                edit_category_options = [
-                    "Ăn uống", "Đi lại", "Học tập", "Giải trí", "Mua sắm", "Khác"
-                ]
-            else:
-                edit_category_options = [
-                    "Lương", "Làm thêm", "Thưởng", "Thu nhập khác"
-                ]
-            current_category = current_transaction["category_name"]
-            if current_category not in edit_category_options:
-                edit_category_options.append(current_category)
-            edit_category = st.selectbox(
-                "Danh mục",
-                edit_category_options,
-                index=edit_category_options.index(current_category),
-                key=f"edit_category_{selected_edit_id}_{edit_type_label}",
-            )
-
-            if st.button("Lưu thay đổi", type="primary"):
-                if not edit_name.strip():
-                    st.error("Tên giao dịch không được để trống.")
-                elif edit_amount <= 0:
-                    st.error("Số tiền phải lớn hơn 0.")
-                else:
-                    st.session_state.transactions.loc[
-                        record_mask, "description"
-                    ] = edit_name.strip()
-                    st.session_state.transactions.loc[
-                        record_mask, "amount_vnd"
-                    ] = int(edit_amount)
-                    st.session_state.transactions.loc[
-                        record_mask, "transaction_date"
-                    ] = edit_date
-                    st.session_state.transactions.loc[
-                        record_mask, "transaction_type"
-                    ] = TYPE_VALUES[edit_type_label]
-                    st.session_state.transactions.loc[
-                        record_mask, "category_name"
-                    ] = edit_category
-                    st.success("Cập nhật giao dịch thành công!")
+        st.warning("Thao tác này xóa giao dịch khỏi cơ sở dữ liệu.")
+        if st.button("Xóa giao dịch", key=f"delete_transaction_{selected_id}"):
+            try:
+                with st.spinner("Đang xóa giao dịch..."):
+                    deleted = request(
+                        "transaction.delete", {"transaction_id": int(selected_id)}
+                    )
+                if deleted:
+                    st.success("Đã xóa giao dịch.")
                     st.rerun()
+                else:
+                    st.error("Không tìm thấy giao dịch để xóa.")
+            except Exception as error:
+                st.error(f"Không thể xóa giao dịch: {error}")
