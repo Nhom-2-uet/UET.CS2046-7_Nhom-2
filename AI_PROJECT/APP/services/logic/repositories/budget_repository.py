@@ -1,34 +1,13 @@
 # ---- (1. IMPORT) ----
-from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from APP.models.budget_settings import BudgetSettings
-from database.connection import get_connection
-
-
-# ---- (2. MỞ KẾT NỐI DATABASE) ----
-@contextmanager
-def _open_cursor() -> Iterator[Any]:
-    """Mở cursor; lưu thay đổi nếu thành công, hoàn tác nếu gặp lỗi."""
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        yield cursor
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
+from services.logic.repositories._db import open_cursor as _open_cursor
 
 
 # ---- (3. CHUYỂN DÒNG DATABASE THÀNH MODEL PYTHON) ----
 def _row_to_budget_settings(row: dict[str, Any]) -> BudgetSettings:
-    """Chuyển một dòng trong budget_settings thành BudgetSettings."""
+    """Chuyển một dòng database thành model BudgetSettings."""
     return BudgetSettings(
         setting_id=row["setting_id"],
         user_id=row["user_id"],

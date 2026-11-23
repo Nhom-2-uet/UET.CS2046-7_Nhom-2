@@ -1,42 +1,13 @@
 #----1.IMPORT----
 """Chuẩn bị giao dịch để xem trước và chỉ lưu sau khi xác nhận."""
 
+from APP.models.transaction import Transaction, TransactionDraft
 from datetime import date
 
-from APP.models.transaction import Transaction, TransactionDraft
-from AI_PROJECT.APP.services.logic.transaction_service import create_transaction
-from database.connection import get_connection
-
-#----2.TÌM DANH MUC TRONG DB----
-def _find_category_id(category_name: str, transaction_type: str) -> int:
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor()
-        cursor.execute(
-            """
-            SELECT category_id
-            FROM categories
-            WHERE name = %s
-              AND type = %s
-              AND is_active = TRUE
-            """,
-            (category_name, transaction_type),
-        )
-        row = cursor.fetchone()
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
-
-    if row is None:
-        raise ValueError(
-            f"Không tìm thấy danh mục '{category_name}' "
-            f"cho loại giao dịch '{transaction_type}'."
-        )
-
-    return int(row[0])
+from services.logic.repositories.transaction_repository import (
+    create_transaction,
+    get_category_id,
+)
 
 #----3.TẠO BẢN NHÁP, CHƯA LƯU----
 def prepare_transaction_draft(data: dict) -> TransactionDraft:
@@ -72,7 +43,7 @@ def prepare_transaction_draft(data: dict) -> TransactionDraft:
     except (TypeError, ValueError) as error:
         raise ValueError("Ngày phải có dạng YYYY-MM-DD.") from error
 
-    category_id = _find_category_id(
+    category_id = get_category_id(
         category_name.strip(),
         transaction_type,
     )

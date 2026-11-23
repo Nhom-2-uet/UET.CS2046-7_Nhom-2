@@ -3,8 +3,9 @@
 from calendar import monthrange
 from datetime import date, datetime
 from difflib import SequenceMatcher
-from math import ceil
 from typing import Any
+
+from services.logic.analytics.saving_service import SavingService
 
 
 def _value(record: Any, key: str, default: Any = None) -> Any:
@@ -152,26 +153,20 @@ class InsightService:
                 _value(goal, "progress_vnd", _value(goal, "current_saved", 0))
             )
             deadline = _as_date(_value(goal, "deadline"))
-            remaining = max(0.0, target - saved)
-            days_left = (deadline - current_date).days
-
-            if remaining == 0:
-                required_per_month = 0
-                status = "COMPLETED"
-            elif days_left < 0:
-                required_per_month = ceil(remaining)
-                status = "OVERDUE"
-            else:
-                months_left = max(days_left / 30.0, 1.0 / 30.0)
-                required_per_month = ceil(remaining / months_left)
-                status = "IN_PROGRESS"
+            progress = SavingService.evaluate_saving_goal(
+                goal_name=_value(goal, "name", ""),
+                target_amount=target,
+                current_saved=saved,
+                deadline_str=deadline.isoformat(),
+                current_date=current_date,
+            )
 
             goal_results.append({
-                "goal_name": _value(goal, "name", ""),
-                "remaining_amount_vnd": round(remaining, 2),
+                "goal_name": progress["goal_name"],
+                "remaining_amount_vnd": round(progress["remaining_amount"], 2),
                 "deadline": deadline.isoformat(),
-                "required_per_month_vnd": required_per_month,
-                "status": status,
+                "required_per_month_vnd": progress["required_per_month"],
+                "status": progress["status"],
             })
 
         total_required = sum(

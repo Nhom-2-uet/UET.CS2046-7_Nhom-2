@@ -1,12 +1,11 @@
 """Các thao tác dữ liệu cho những khoản chi bắt buộc."""
 
 # ---- (1. IMPORT VÀ CẤU HÌNH CÁC CỘT) ----
-from contextlib import contextmanager
 from datetime import date
-from typing import Any, Iterator
+from typing import Any
 
 from APP.models.required_expense import ExpenseStatus, RequiredExpense
-from database.connection import get_connection
+from services.logic.repositories._db import open_cursor as _open_cursor
 
 
 _SELECT_COLUMNS = """
@@ -19,28 +18,9 @@ _SELECT_COLUMNS = """
 _ALLOWED_STATUSES = {"unpaid", "paid", "cancelled"}
 
 
-# ---- (2. MỞ KẾT NỐI VÀ CURSOR) ----
-@contextmanager
-def _open_cursor() -> Iterator[Any]:
-    """Commit nếu thao tác thành công; rollback nếu lỗi; luôn đóng kết nối."""
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        yield cursor
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
-
-
 # ---- (3. ĐỔI DÒNG DATABASE THÀNH MODEL PYTHON) ----
 def _row_to_required_expense(row: dict[str, Any]) -> RequiredExpense:
+    """Chuyển một dòng database thành model RequiredExpense."""
     return RequiredExpense(
         expense_id=row["expense_id"],
         user_id=row["user_id"],

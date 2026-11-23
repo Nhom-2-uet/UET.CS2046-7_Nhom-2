@@ -5,16 +5,15 @@ chi vượt, bù tiến độ hay phân bổ khoản dư.
 """
 
 # ---- (1. IMPORT) ----
-from contextlib import contextmanager
 from datetime import date
-from typing import Any, Iterator
+from typing import Any
 
 from APP.models.saving_goal import GoalStatus, SavingGoal
 from APP.models.saving_goal_daily_progress import (
     SavingGoalDailyProgress,
     SurplusAction,
 )
-from database.connection import get_connection
+from services.logic.repositories._db import open_cursor as _open_cursor
 
 
 # ---- (2. DATABASE COLUMNS) ----
@@ -39,29 +38,9 @@ TERMINAL_STATUSES = {"finished", "failed", "cancelled"}
 ALLOWED_SURPLUS_ACTIONS = {"to_goal", "to_buffer", "none"}
 
 
-# ---- (3. OPEN CONNECTION AND CURSOR) ----
-@contextmanager
-def _open_cursor() -> Iterator[Any]:
-    """Mở kết nối; commit nếu thành công, rollback nếu có lỗi, rồi đóng lại."""
-    connection = get_connection()
-    cursor = None
-
-    try:
-        cursor = connection.cursor(dictionary=True)
-        yield cursor
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        connection.close()
-
-
 # ---- (4. CONVERT DATABASE ROWS TO PYTHON MODELS) ----
 def _row_to_goal(row: dict[str, Any]) -> SavingGoal:
-    """Đổi một dòng saving_goals thành đối tượng SavingGoal."""
+    """Chuyển một dòng database thành model SavingGoal."""
     return SavingGoal(
         goal_id=row["goal_id"],
         user_id=row["user_id"],
@@ -76,7 +55,7 @@ def _row_to_goal(row: dict[str, Any]) -> SavingGoal:
 
 
 def _row_to_daily_progress(row: dict[str, Any]) -> SavingGoalDailyProgress:
-    """Đổi một dòng lịch sử thành đối tượng SavingGoalDailyProgress."""
+    """Chuyển một dòng database thành model SavingGoalDailyProgress."""
     return SavingGoalDailyProgress(
         progress_id=row["progress_id"],
         goal_id=row["goal_id"],

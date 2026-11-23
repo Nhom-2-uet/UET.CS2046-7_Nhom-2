@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 class FinanceService:
 
@@ -127,27 +126,20 @@ class FinanceService:
 
      @classmethod
      def check_budget_status(cls, transactions, budget_limit, month, year):
-        if budget_limit < 0:
-            raise ValueError("Hạn mức ngân sách không được âm.")
-        total_expense = cls.calculate_expense_by_period(transactions, month=month, year=year)
-        usage_percent = (
-            round((total_expense / budget_limit * 100), 2)
-            if budget_limit > 0
-            else (100.0 if total_expense > 0 else 0.0)
-        )
-        
-        status = "NORMAL"
-        if usage_percent >= 100:
-            status = "EXCEEDED"
-        elif usage_percent >= 80:
-            status = "WARNING"
+        from services.logic.analytics.budget_service import BudgetService
 
+        total_expense = cls.calculate_expense_by_period(transactions, month=month, year=year)
+        result = BudgetService.evaluate_budget_status(
+            label="Ngân sách tổng",
+            budget_limit=budget_limit,
+            spent_amount=total_expense,
+        )
         return {
             "budget_limit": budget_limit,
             "total_expense": round(total_expense, 2),
-            "remaining_budget": round(budget_limit - total_expense, 2),
-            "usage_percent": usage_percent,
-            "status": status
+            "remaining_budget": result["remaining_amount"],
+            "usage_percent": result["usage_percentage"],
+            "status": result["status"],
         }
 
      @classmethod
