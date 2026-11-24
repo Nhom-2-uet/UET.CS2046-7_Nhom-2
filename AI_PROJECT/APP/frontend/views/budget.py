@@ -1,9 +1,10 @@
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from frontend.api_client import request
 from utils.formatting import format_date, format_vnd
 
 
@@ -14,383 +15,176 @@ EXPENSE_STATUS_LABELS = {
 }
 
 
-def _initial_required_expenses() -> list[dict]:
-    today = date.today()
-    return [
-        {
-            "expense_id": 1,
-            "name": "Tiền trọ",
-            "amount_vnd": 2_000_000,
-            "due_date": today + timedelta(days=5),
-            "status": "unpaid",
-            "paid_transaction_id": None,
-        },
-        {
-            "expense_id": 2,
-            "name": "Tiền điện nước",
-            "amount_vnd": 450_000,
-            "due_date": today + timedelta(days=10),
-            "status": "unpaid",
-            "paid_transaction_id": None,
-        },
-        {
-            "expense_id": 3,
-            "name": "Internet",
-            "amount_vnd": 200_000,
-            "due_date": today + timedelta(days=12),
-            "status": "unpaid",
-            "paid_transaction_id": None,
-        },
-    ]
-
-
 def render_budget() -> None:
-    """Render the Budget page with a session-local monthly budget form."""
     st.header("Quản lý ngân sách")
-    st.caption("Theo dõi ngân sách, chi tiêu theo danh mục và các khoản chi bắt buộc.")
+    st.caption("Thiết lập và theo dõi ngân sách, khoản chi bắt buộc từ database.")
 
-    st.session_state.setdefault("budget_settings_mock", None)
-    st.session_state.setdefault("budget_monthly_input", 0)
-    st.session_state.setdefault("budget_payday_input", 1)
-    if "budget_required_expenses_mock" not in st.session_state:
-        st.session_state["budget_required_expenses_mock"] = (
-            _initial_required_expenses()
-        )
-    st.session_state.setdefault(
-        "budget_required_expense_next_id",
-        max(
-            (
-                expense["expense_id"]
-                for expense in st.session_state["budget_required_expenses_mock"]
-            ),
-            default=0,
-        ) + 1,
-    )
-    current_month = date.today().strftime("%Y-%m")
-    spending_mock = st.session_state.get("budget_spending_mock")
-    if spending_mock is None or spending_mock["month"] != current_month:
-        st.session_state["budget_spending_mock"] = {
-            "month": current_month,
-            "transactions": [
-                {"description": "Khoản chi minh họa 1", "amount_vnd": 1_500_000},
-                {"description": "Khoản chi minh họa 2", "amount_vnd": 1_200_000},
-                {"description": "Khoản chi minh họa 3", "amount_vnd": 550_000},
-            ],
-        }
-    category_spending_mock = st.session_state.get(
-        "budget_category_spending_mock"
-    )
-    if category_spending_mock is None or category_spending_mock["month"] != current_month:
-        st.session_state["budget_category_spending_mock"] = {
-            "month": current_month,
-            "categories": [
-                {"category": "Ăn uống", "amount_vnd": 1_200_000},
-                {"category": "Đi lại", "amount_vnd": 600_000},
-                {"category": "Học tập", "amount_vnd": 800_000},
-                {"category": "Giải trí", "amount_vnd": 400_000},
-                {"category": "Khác", "amount_vnd": 250_000},
-            ],
-        }
+    try:
+        with st.spinner("Đang tải ngân sách..."):
+            settings = request("budget.get")
+            all_expenses = request("expense.list")
+            transactions = request("transaction.list")
+    except Exception as error:
+        st.error(f"Không tải được dữ liệu ngân sách: {error}")
+        return
 
+    current = settings
     with st.container(border=True):
-        st.subheader("Thiết lập ngân sách")
+        st.subheader("Thiết lập ngân sách tháng")
         with st.form("monthly_budget_settings_form"):
-            monthly_budget_vnd = st.number_input(
-                "Ngân sách tháng (VND)",
-                min_value=0,
-                step=100_000,
-                key="budget_monthly_input",
+            monthly_budget = st.number_input(
+                "Ngân sách tháng (VND)", min_value=0, step=100_000,
+                value=int(current.monthly_budget_vnd) if current else 0,
             )
             payday = st.selectbox(
-                "Ngày nhận tiền",
-                options=list(range(1, 32)),
+                "Ngày nhận tiền", list(range(1, 32)),
+                index=(current.payday or 1) - 1 if current else 0,
                 format_func=lambda day: f"Ngày {day}",
-                key="budget_payday_input",
             )
             submitted = st.form_submit_button("Lưu thiết lập")
-
         if submitted:
-            if monthly_budget_vnd <= 0:
-                st.error("Ngân sách tháng phải lớn hơn 0 VND.")
-            else:
-                st.session_state["budget_settings_mock"] = {
-                    "monthly_budget_vnd": int(monthly_budget_vnd),
-                    "payday": int(payday),
-                }
-                st.success("Đã lưu thiết lập ngân sách mẫu.")
+            try:
+                with st.spinner("Đang lưu thiết lập..."):
+                    settings = request(
+                        "budget.save",
+                        {"monthly_budget_vnd": int(monthly_budget), "payday": int(payday)},
+                    )
+                st.success("Đã lưu thiết lập ngân sách.")
+                st.rerun()
+            except Exception as error:
+                st.error(f"Không thể lưu ngân sách: {error}")
+        if settings:
+            st.metric("Ngân sách tháng", format_vnd(settings.monthly_budget_vnd))
 
-        saved_settings = st.session_state["budget_settings_mock"]
-        if saved_settings is None:
-            st.info("Nhập ngân sách tháng và ngày nhận tiền, sau đó lưu thiết lập.")
+    if not settings:
+        st.info("Hãy lưu thiết lập ngân sách để xem tổng quan.")
+    else:
+        today = date.today()
+        monthly_spending = sum(
+            row.amount_vnd for row in transactions
+            if row.transaction_type == "expense"
+            and row.transaction_date.year == today.year
+            and row.transaction_date.month == today.month
+        )
+        budget_amount = int(settings.monthly_budget_vnd)
+        remaining = budget_amount - monthly_spending
+        usage = monthly_spending / budget_amount if budget_amount else 0
+        cols = st.columns(4)
+        cols[0].metric("Ngân sách", format_vnd(budget_amount))
+        cols[1].metric("Đã chi tháng này", format_vnd(monthly_spending))
+        cols[2].metric("Còn lại", format_vnd(remaining))
+        cols[3].metric("Đã sử dụng", f"{usage * 100:.1f}%")
+        st.progress(min(max(usage, 0), 1))
+        if usage >= 1:
+            st.error("Bạn đã dùng hết hoặc vượt ngân sách tháng.")
+        elif usage >= 0.8:
+            st.warning("Bạn sắp sử dụng hết ngân sách tháng.")
         else:
-            budget_col, payday_col = st.columns(2)
-            budget_col.metric(
-                "Ngân sách tháng", format_vnd(saved_settings["monthly_budget_vnd"])
+            st.success("Chi tiêu đang trong mức ngân sách.")
+
+    st.subheader("Chi tiêu theo danh mục tháng này")
+    today = date.today()
+    category_totals: dict[str, int] = {}
+    for row in transactions:
+        if (row.transaction_type == "expense" and row.transaction_date.year == today.year
+                and row.transaction_date.month == today.month):
+            category_totals[row.category_name] = (
+                category_totals.get(row.category_name, 0) + row.amount_vnd
             )
-            payday_col.metric("Ngày nhận tiền", f"Ngày {saved_settings['payday']}")
-
-    with st.container(border=True):
-        st.subheader("Tổng quan ngân sách")
-        if saved_settings is None:
-            st.info("Hãy thiết lập ngân sách tháng trước để xem tổng quan.")
-        else:
-            monthly_budget_vnd = saved_settings["monthly_budget_vnd"]
-            if monthly_budget_vnd <= 0:
-                st.info("Hãy thiết lập ngân sách tháng lớn hơn 0 để xem tổng quan.")
-            else:
-                monthly_expenses = st.session_state["budget_spending_mock"][
-                    "transactions"
-                ]
-                total_spent_vnd = sum(
-                    item["amount_vnd"] for item in monthly_expenses
-                )
-                remaining_vnd = monthly_budget_vnd - total_spent_vnd
-                used_percentage = total_spent_vnd / monthly_budget_vnd * 100
-
-                budget_col, spent_col, remaining_col, usage_col = st.columns(4)
-                budget_col.metric("Ngân sách tháng", format_vnd(monthly_budget_vnd))
-                spent_col.metric("Đã chi trong tháng", format_vnd(total_spent_vnd))
-                remaining_col.metric("Còn lại", format_vnd(remaining_vnd))
-                usage_col.metric("Đã sử dụng", f"{used_percentage:.1f}%")
-
-                st.progress(min(used_percentage / 100, 1.0))
-                if used_percentage < 80:
-                    st.success("Chi tiêu trong mức an toàn.")
-                elif used_percentage < 100:
-                    st.warning("Bạn sắp sử dụng hết ngân sách tháng.")
-                else:
-                    st.error("Bạn đã dùng hết hoặc vượt ngân sách tháng.")
-
-    with st.container(border=True):
-        st.subheader("Chi tiêu theo danh mục")
-        category_data = pd.DataFrame(
-            st.session_state["budget_category_spending_mock"]["categories"]
+    if category_totals:
+        category_frame = pd.DataFrame(
+            [{"Danh mục": name, "Số tiền": amount} for name, amount in category_totals.items()]
         )
-        total_category_spending = int(category_data["amount_vnd"].sum())
-        category_data["percentage"] = (
-            category_data["amount_vnd"] / total_category_spending * 100
-        )
-        highest_spending = category_data.loc[
-            category_data["amount_vnd"].idxmax()
-        ]
-
-        highest_col, total_col = st.columns(2)
-        highest_col.metric(
-            f"Chi tiêu cao nhất · {highest_spending['category']}",
-            format_vnd(int(highest_spending["amount_vnd"])),
-        )
-        total_col.metric(
-            "Tổng chi tiêu theo danh mục",
-            format_vnd(total_category_spending),
-        )
-
         chart_col, table_col = st.columns(2)
-        with chart_col:
-            pie_chart = px.pie(
-                category_data,
-                names="category",
-                values="amount_vnd",
-                title="Tỷ trọng chi tiêu theo danh mục",
-                labels={"category": "Danh mục", "amount_vnd": "Số tiền"},
+        chart_col.plotly_chart(
+            px.pie(category_frame, names="Danh mục", values="Số tiền"),
+            use_container_width=True,
+        )
+        table_col.dataframe(
+            category_frame.assign(**{"Số tiền": category_frame["Số tiền"].map(format_vnd)}),
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("Chưa có giao dịch chi tiêu trong tháng này.")
+
+    st.subheader("Khoản chi bắt buộc")
+    with st.expander("Thêm khoản chi", expanded=False):
+        with st.form("required_expense_create_form", clear_on_submit=True):
+            name = st.text_input("Tên khoản chi", max_chars=150)
+            amount = st.number_input("Số tiền (VND)", min_value=0, step=10_000)
+            due_date = st.date_input("Ngày đến hạn", value=date.today())
+            add = st.form_submit_button("Thêm khoản chi")
+        if add:
+            try:
+                with st.spinner("Đang thêm khoản chi..."):
+                    request("expense.create", {
+                        "name": name, "amount_vnd": int(amount), "due_date": due_date
+                    })
+                st.success("Đã thêm khoản chi bắt buộc.")
+                st.rerun()
+            except Exception as error:
+                st.error(f"Không thể thêm khoản chi: {error}")
+
+    status_filter = st.selectbox(
+        "Lọc trạng thái", ["Tất cả", *EXPENSE_STATUS_LABELS.values()]
+    )
+    status_by_label = {value: key for key, value in EXPENSE_STATUS_LABELS.items()}
+    visible_expenses = [
+        item for item in all_expenses
+        if status_filter == "Tất cả" or item.status == status_by_label[status_filter]
+    ]
+    if not visible_expenses:
+        st.info("Không có khoản chi nào phù hợp.")
+    else:
+        table = pd.DataFrame([
+            {
+                "ID": item.expense_id,
+                "Tên khoản chi": item.name,
+                "Số tiền": format_vnd(item.amount_vnd),
+                "Ngày đến hạn": format_date(item.due_date),
+                "Trạng thái": EXPENSE_STATUS_LABELS[item.status],
+            }
+            for item in visible_expenses
+        ])
+        st.dataframe(table, hide_index=True, use_container_width=True)
+        editable = [item for item in visible_expenses if item.status == "unpaid"]
+        if editable:
+            chosen = st.selectbox(
+                "Chọn khoản chưa thanh toán",
+                editable,
+                format_func=lambda item: f"{item.name} · {format_vnd(item.amount_vnd)}",
             )
-            pie_chart.update_traces(textinfo="label+percent")
-            st.plotly_chart(pie_chart, use_container_width=True)
-
-        with table_col:
-            category_table = pd.DataFrame(
-                {
-                    "Danh mục": category_data["category"],
-                    "Số tiền": category_data["amount_vnd"].map(format_vnd),
-                    "Tỷ lệ": category_data["percentage"].map(
-                        lambda percentage: f"{percentage:.1f}%"
-                    ),
-                }
-            )
-            st.dataframe(category_table, hide_index=True, use_container_width=True)
-
-    with st.container(border=True):
-        st.subheader("Khoản chi bắt buộc")
-        required_expenses = st.session_state["budget_required_expenses_mock"]
-        flash_message = st.session_state.pop(
-            "budget_required_expenses_flash", None
-        )
-        if flash_message is not None:
-            st.success(flash_message)
-
-        active_expenses = [
-            expense for expense in required_expenses
-            if expense["status"] != "cancelled"
-        ]
-        unpaid_expenses = [
-            expense for expense in required_expenses
-            if expense["status"] == "unpaid"
-        ]
-        total_active_amount = sum(
-            expense["amount_vnd"] for expense in active_expenses
-        )
-        total_unpaid_amount = sum(
-            expense["amount_vnd"] for expense in unpaid_expenses
-        )
-
-        count_col, amount_col, unpaid_col = st.columns(3)
-        count_col.metric("Tổng số khoản chi", len(required_expenses))
-        amount_col.metric(
-            "Tổng tiền (không gồm khoản đã hủy)",
-            format_vnd(total_active_amount),
-        )
-        unpaid_col.metric("Tổng tiền chưa thanh toán", format_vnd(total_unpaid_amount))
-
-        with st.expander("Thêm khoản chi bắt buộc", expanded=False):
-            with st.form("add_required_expense_form", clear_on_submit=True):
-                new_expense_name = st.text_input(
-                    "Tên khoản chi", max_chars=150
-                )
-                new_expense_amount = st.number_input(
-                    "Số tiền (VND)", min_value=0, step=10_000
-                )
-                new_expense_due_date = st.date_input(
-                    "Ngày đến hạn", value=date.today()
-                )
-                add_expense_submitted = st.form_submit_button("Thêm khoản chi")
-
-            if add_expense_submitted:
-                if not new_expense_name.strip():
-                    st.error("Vui lòng nhập tên khoản chi.")
-                elif new_expense_amount <= 0:
-                    st.error("Số tiền phải lớn hơn 0 VND.")
-                else:
-                    next_expense_id = st.session_state[
-                        "budget_required_expense_next_id"
-                    ]
-                    st.session_state["budget_required_expense_next_id"] += 1
-                    required_expenses.append(
-                        {
-                            "expense_id": next_expense_id,
-                            "name": new_expense_name.strip(),
-                            "amount_vnd": int(new_expense_amount),
-                            "due_date": new_expense_due_date,
-                            "status": "unpaid",
-                            "paid_transaction_id": None,
-                        }
+            with st.expander("Sửa khoản chi"):
+                with st.form(f"expense_edit_{chosen.expense_id}"):
+                    edit_name = st.text_input("Tên khoản chi", value=chosen.name)
+                    edit_amount = st.number_input(
+                        "Số tiền (VND)", min_value=0, value=int(chosen.amount_vnd), step=10_000
                     )
-                    st.session_state["budget_required_expenses_mock"] = (
-                        required_expenses
-                    )
-                    st.session_state["budget_required_expenses_flash"] = (
-                        "Đã thêm khoản chi bắt buộc."
-                    )
-                    st.rerun()
-
-        filter_options = {
-            "Tất cả": None,
-            "Chưa thanh toán": "unpaid",
-            "Đã thanh toán": "paid",
-            "Đã hủy": "cancelled",
-        }
-        selected_status_label = st.selectbox(
-            "Lọc theo trạng thái",
-            list(filter_options),
-            key="required_expense_status_filter",
-        )
-        selected_status = filter_options[selected_status_label]
-        filtered_expenses = [
-            expense for expense in required_expenses
-            if selected_status is None or expense["status"] == selected_status
-        ]
-
-        if filtered_expenses:
-            expense_table = pd.DataFrame(
-                [
-                    {
-                        "Tên khoản chi": expense["name"],
-                        "Số tiền (VND)": format_vnd(expense["amount_vnd"]),
-                        "Ngày đến hạn": format_date(expense["due_date"]),
-                        "Trạng thái": EXPENSE_STATUS_LABELS[expense["status"]],
-                        "Thao tác": (
-                            "Sửa / Xóa"
-                            if expense["status"] == "unpaid"
-                            else "Chỉ xem"
-                        ),
-                    }
-                    for expense in filtered_expenses
-                ]
-            )
-            st.dataframe(expense_table, hide_index=True, use_container_width=True)
-        else:
-            st.info("Không có khoản chi nào phù hợp với trạng thái đã chọn.")
-
-        editable_expenses = [
-            expense for expense in filtered_expenses
-            if expense["status"] == "unpaid"
-        ]
-        if editable_expenses:
-            with st.expander("Chỉnh sửa hoặc xóa khoản chưa thanh toán"):
-                editable_ids = [
-                    expense["expense_id"] for expense in editable_expenses
-                ]
-                selected_expense_id = st.selectbox(
-                    "Chọn khoản chi",
-                    editable_ids,
-                    format_func=lambda expense_id: next(
-                        expense["name"]
-                        for expense in editable_expenses
-                        if expense["expense_id"] == expense_id
-                    ),
-                    key=(
-                        "required_expense_action_"
-                        + "_".join(map(str, editable_ids))
-                    ),
-                )
-                selected_expense = next(
-                    expense for expense in editable_expenses
-                    if expense["expense_id"] == selected_expense_id
-                )
-
-                with st.form(f"edit_required_expense_{selected_expense_id}"):
-                    edited_name = st.text_input(
-                        "Tên khoản chi",
-                        value=selected_expense["name"],
-                        max_chars=150,
-                    )
-                    edited_amount = st.number_input(
-                        "Số tiền (VND)",
-                        min_value=0,
-                        value=int(selected_expense["amount_vnd"]),
-                        step=10_000,
-                    )
-                    edited_due_date = st.date_input(
-                        "Ngày đến hạn",
-                        value=selected_expense["due_date"],
-                    )
-                    edit_submitted = st.form_submit_button("Lưu thay đổi")
-
-                if edit_submitted:
-                    if not edited_name.strip():
-                        st.error("Tên khoản chi không được để trống.")
-                    elif edited_amount <= 0:
-                        st.error("Số tiền phải lớn hơn 0 VND.")
-                    else:
-                        selected_expense["name"] = edited_name.strip()
-                        selected_expense["amount_vnd"] = int(edited_amount)
-                        selected_expense["due_date"] = edited_due_date
-                        st.session_state["budget_required_expenses_mock"] = (
-                            required_expenses
-                        )
-                        st.session_state["budget_required_expenses_flash"] = (
-                            "Đã cập nhật khoản chi."
-                        )
+                    edit_due = st.date_input("Ngày đến hạn", value=chosen.due_date)
+                    save = st.form_submit_button("Lưu thay đổi")
+                if save:
+                    try:
+                        updated = request("expense.update", {
+                            "expense_id": chosen.expense_id,
+                            "name": edit_name,
+                            "amount_vnd": int(edit_amount),
+                            "due_date": edit_due,
+                        })
+                        if updated is None:
+                            st.error("Khoản chi không còn ở trạng thái có thể sửa.")
+                        else:
+                            st.success("Đã cập nhật khoản chi.")
+                            st.rerun()
+                    except Exception as error:
+                        st.error(f"Không thể cập nhật khoản chi: {error}")
+            if st.button("Xóa khoản chi", key=f"expense_delete_{chosen.expense_id}"):
+                try:
+                    deleted = request("expense.delete", {"expense_id": chosen.expense_id})
+                    if deleted:
+                        st.success("Đã xóa khoản chi.")
                         st.rerun()
-
-                if st.button(
-                    "Xóa khoản chi",
-                    key=f"delete_required_expense_{selected_expense_id}",
-                    type="secondary",
-                ):
-                    st.session_state["budget_required_expenses_mock"] = [
-                        expense for expense in required_expenses
-                        if expense["expense_id"] != selected_expense_id
-                    ]
-                    st.session_state["budget_required_expenses_flash"] = (
-                        "Đã xóa khoản chi."
-                    )
-                    st.rerun()
+                    else:
+                        st.error("Chỉ có thể xóa khoản chi chưa thanh toán.")
+                except Exception as error:
+                    st.error(f"Không thể xóa khoản chi: {error}")

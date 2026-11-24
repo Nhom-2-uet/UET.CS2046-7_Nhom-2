@@ -105,23 +105,19 @@ def get_category_id(category_name: str, transaction_type: str) -> int:
     return int(row["category_id"])
 
 
-def get_categories(transaction_type: str) -> list[str]:
-    """List active categories for an income or expense transaction."""
-    if transaction_type not in {"income", "expense"}:
+def get_categories(transaction_type: str | None = None) -> list[dict[str, Any]]:
+    """Return active categories, optionally limited to income or expense."""
+    if transaction_type is not None and transaction_type not in {"income", "expense"}:
         raise ValueError("Loại giao dịch phải là income hoặc expense.")
-
+    query = "SELECT category_id, name, type FROM categories WHERE is_active = TRUE"
+    parameters: tuple[Any, ...] = ()
+    if transaction_type is not None:
+        query += " AND type = %s"
+        parameters = (transaction_type,)
+    query += " ORDER BY type, name"
     with _open_cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT name
-            FROM categories
-            WHERE type = %s AND is_active = TRUE
-            ORDER BY name
-            """,
-            (transaction_type,),
-        )
-        rows = cursor.fetchall()
-    return [row["name"] for row in rows]
+        cursor.execute(query, parameters)
+        return cursor.fetchall()
 
 
 # --- (6. HÀM PHỤ: ĐỌC 1 DÒNG THEO ID) ---
