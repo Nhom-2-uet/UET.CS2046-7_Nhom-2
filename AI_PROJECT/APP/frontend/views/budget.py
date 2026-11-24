@@ -36,6 +36,14 @@ def render_budget() -> None:
                 "Ngân sách tháng (VND)", min_value=0, step=100_000,
                 value=int(current.monthly_budget_vnd) if current else 0,
             )
+            weekday_limit = st.number_input(
+                "Hạn mức mỗi ngày thường (VND, 0 = không đặt)", min_value=0, step=10_000,
+                value=int(current.weekday_daily_limit_vnd) if current else 0,
+            )
+            weekend_limit = st.number_input(
+                "Hạn mức mỗi ngày cuối tuần (VND, 0 = không đặt)", min_value=0, step=10_000,
+                value=int(current.weekend_daily_limit_vnd) if current else 0,
+            )
             payday = st.selectbox(
                 "Ngày nhận tiền", list(range(1, 32)),
                 index=(current.payday or 1) - 1 if current else 0,
@@ -47,7 +55,12 @@ def render_budget() -> None:
                 with st.spinner("Đang lưu thiết lập..."):
                     settings = request(
                         "budget.save",
-                        {"monthly_budget_vnd": int(monthly_budget), "payday": int(payday)},
+                        {
+                            "monthly_budget_vnd": int(monthly_budget),
+                            "weekday_daily_limit_vnd": int(weekday_limit),
+                            "weekend_daily_limit_vnd": int(weekend_limit),
+                            "payday": int(payday),
+                        },
                     )
                 st.success("Đã lưu thiết lập ngân sách.")
                 st.rerun()
@@ -60,6 +73,41 @@ def render_budget() -> None:
         st.info("Hãy lưu thiết lập ngân sách để xem tổng quan.")
     else:
         today = date.today()
+        today_limit = (
+            settings.weekend_daily_limit_vnd if today.weekday() >= 5
+            else settings.weekday_daily_limit_vnd
+        )
+        today_spending = sum(
+            row.amount_vnd for row in transactions
+            if row.transaction_type == "expense" and row.transaction_date == today
+        )
+        st.subheader("Hạn mức chi tiêu hôm nay")
+        if today_limit > 0:
+            st.metric("Hạn mức hôm nay", format_vnd(today_limit))
+            st.metric("Đã chi hôm nay", format_vnd(today_spending),
+                      delta=f"Còn {format_vnd(today_limit - today_spending)}")
+            daily_usage = today_spending / today_limit
+            st.progress(min(max(daily_usage, 0), 1))
+            if daily_usage >= 1:
+                st.error("Bạn đã chạm hoặc vượt hạn mức hôm nay.")
+            elif daily_usage >= 0.8:
+                st.warning("Bạn sắp chạm hạn mức hôm nay.")
+        else:
+            st.info("Hạn mức cho hôm nay chưa được đặt. Số 0 nghĩa là không đặt hạn mức.")
+        with st.container(border=True):
+            st.subheader("Cảnh báo chi bất thường · Bản demo")
+            st.caption(
+                "Minh họa cách gộp cảnh báo vượt hạn mức ngày với giao dịch tăng đột biến. "
+                "Dữ liệu bên dưới là ví dụ, chưa được phân tích từ giao dịch thực tế."
+            )
+            demo_cols = st.columns(3)
+            demo_cols[0].metric("Danh mục", "Ăn uống")
+            demo_cols[1].metric("Giao dịch minh họa", format_vnd(300_000))
+            demo_cols[2].metric("So với mức thường", "3×")
+            st.warning(
+                "Ví dụ: khoản ăn uống 300.000 VND cao gấp 3 lần mức thường. "
+                "Khi triển khai thật, cảnh báo sẽ dựa trên giao dịch và hạn mức đã lưu."
+            )
         monthly_spending = sum(
             row.amount_vnd for row in transactions
             if row.transaction_type == "expense"

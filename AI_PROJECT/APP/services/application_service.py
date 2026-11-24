@@ -47,7 +47,11 @@ def execute(command: str, data: dict[str, Any]) -> Any:
         return budgets.get_budget_settings(user_id)
     if command == "budget.save":
         return budgets.save_budget_settings(
-            user_id, int(data["monthly_budget_vnd"]), data.get("payday")
+            user_id,
+            int(data["monthly_budget_vnd"]),
+            data.get("payday"),
+            int(data.get("weekday_daily_limit_vnd", 0)),
+            int(data.get("weekend_daily_limit_vnd", 0)),
         )
     if command == "expense.list":
         return expenses.get_required_expenses(user_id, data.get("status"))
