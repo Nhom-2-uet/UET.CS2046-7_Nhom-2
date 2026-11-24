@@ -6,6 +6,7 @@ from APP.models.transaction import Transaction
 from APP.models.transaction import TransactionDraft
 from services.logic.repositories.transaction_repository import (
     create_transaction,
+    create_transactions,
     delete_transaction,
     get_category_id,
     get_transactions,
@@ -44,6 +45,29 @@ def save_transaction(user_id: int, data: dict, transaction_id: int | None = None
     if transaction_id is None:
         return create_transaction(user_id, draft)
     return update_transaction(user_id, transaction_id, draft)
+
+
+def save_transactions(user_id: int, items: list[dict]):
+    """Save a confirmed batch atomically after resolving category names."""
+    if not isinstance(items, list) or not items:
+        raise ValueError("Không có giao dịch nào để lưu.")
+    drafts = []
+    for data in items:
+        description = data.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError("Tên giao dịch không được để trống.")
+        transaction_type = data.get("transaction_type")
+        category_id = get_category_id(data.get("category_name"), transaction_type)
+        drafts.append(TransactionDraft(
+            category_id=category_id,
+            transaction_type=transaction_type,
+            amount_vnd=int(data["amount_vnd"]),
+            description=description.strip(),
+            transaction_date=data["transaction_date"],
+            input_source=data.get("input_source", "natural_language"),
+            exclude_from_saving=bool(data.get("exclude_from_saving", False)),
+        ))
+    return create_transactions(user_id, drafts)
 
 
 def remove_transaction(user_id: int, transaction_id: int) -> bool:

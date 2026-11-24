@@ -13,6 +13,7 @@ from services.transaction_service import (
     list_transactions,
     remove_transaction,
     save_transaction,
+    save_transactions,
 )
 from services.logic.analytics.finance_service import FinanceService
 
@@ -36,6 +37,8 @@ def execute(command: str, data: dict[str, Any]) -> Any:
         )
     if command == "transaction.create":
         return save_transaction(user_id, data)
+    if command == "transaction.create_many":
+        return save_transactions(user_id, data.get("transactions", []))
     if command == "transaction.update":
         return save_transaction(user_id, data, data["transaction_id"])
     if command == "transaction.delete":

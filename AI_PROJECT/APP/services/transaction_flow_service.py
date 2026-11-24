@@ -5,7 +5,9 @@ from APP.models.transaction import Transaction, TransactionDraft
 from datetime import date
 
 from services.logic.repositories.transaction_repository import (
+    create_transactions,
     create_transaction,
+    get_categories,
     get_category_id,
 )
 
@@ -70,3 +72,19 @@ def confirm_and_save_transaction(
         return None
 
     return create_transaction(user_id=user_id, draft=draft)
+
+
+def get_transaction_categories(transaction_type: str) -> list[str]:
+    """Return categories available for the selected transaction type."""
+    return get_categories(transaction_type)
+
+
+def confirm_and_save_transactions(
+    user_id: int,
+    drafts: list[TransactionDraft],
+    confirmed: bool,
+) -> list[Transaction]:
+    """Save all reviewed drafts together only after explicit confirmation."""
+    if not confirmed:
+        return []
+    return create_transactions(user_id=user_id, drafts=drafts)

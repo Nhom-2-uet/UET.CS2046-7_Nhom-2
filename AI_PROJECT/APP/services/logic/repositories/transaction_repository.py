@@ -173,6 +173,49 @@ def create_transaction(
         return _row_to_transaction(row)
 
 
+def create_transactions(
+    user_id: int,
+    drafts: list[TransactionDraft],
+) -> list[Transaction]:
+    """Save multiple confirmed drafts atomically for one user."""
+    _check_positive(user_id, "user_id")
+    if not drafts:
+        raise ValueError("Không có giao dịch nào để lưu.")
+    for draft in drafts:
+        _validate_draft(user_id, draft)
+
+    saved_transactions: list[Transaction] = []
+    with _open_cursor() as cursor:
+        for draft in drafts:
+            _validate_category_type(cursor, draft)
+            cursor.execute(
+                """
+                INSERT INTO transactions (
+                    user_id, category_id, transaction_type, amount_vnd,
+                    description, transaction_date, input_source,
+                    exclude_from_saving
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    draft.category_id,
+                    draft.transaction_type,
+                    draft.amount_vnd,
+                    draft.description,
+                    draft.transaction_date,
+                    draft.input_source,
+                    draft.exclude_from_saving,
+                ),
+            )
+            row = _fetch_row(cursor, cursor.lastrowid, user_id)
+            if row is None:
+                raise RuntimeError("Không đọc lại được giao dịch vừa tạo.")
+            saved_transactions.append(_row_to_transaction(row))
+
+    return saved_transactions
+
+
 # --- (8. READ: ĐỌC MỘT GIAO DỊCH) ---
 def get_transaction_by_id(
     user_id: int,
