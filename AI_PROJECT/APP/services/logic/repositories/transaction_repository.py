@@ -105,6 +105,25 @@ def get_category_id(category_name: str, transaction_type: str) -> int:
     return int(row["category_id"])
 
 
+def get_categories(transaction_type: str) -> list[str]:
+    """List active categories for an income or expense transaction."""
+    if transaction_type not in {"income", "expense"}:
+        raise ValueError("Loại giao dịch phải là income hoặc expense.")
+
+    with _open_cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT name
+            FROM categories
+            WHERE type = %s AND is_active = TRUE
+            ORDER BY name
+            """,
+            (transaction_type,),
+        )
+        rows = cursor.fetchall()
+    return [row["name"] for row in rows]
+
+
 # --- (6. HÀM PHỤ: ĐỌC 1 DÒNG THEO ID) ---
 def _fetch_row(cursor: Any, transaction_id: int, user_id: int) -> dict | None:
     """Đọc một dòng giao dịch theo transaction_id và user_id."""
@@ -156,6 +175,49 @@ def create_transaction(
 
         # Bước 4: đổi thành object và trả về
         return _row_to_transaction(row)
+
+
+def create_transactions(
+    user_id: int,
+    drafts: list[TransactionDraft],
+) -> list[Transaction]:
+    """Save multiple confirmed drafts atomically for one user."""
+    _check_positive(user_id, "user_id")
+    if not drafts:
+        raise ValueError("Không có giao dịch nào để lưu.")
+    for draft in drafts:
+        _validate_draft(user_id, draft)
+
+    saved_transactions: list[Transaction] = []
+    with _open_cursor() as cursor:
+        for draft in drafts:
+            _validate_category_type(cursor, draft)
+            cursor.execute(
+                """
+                INSERT INTO transactions (
+                    user_id, category_id, transaction_type, amount_vnd,
+                    description, transaction_date, input_source,
+                    exclude_from_saving
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    draft.category_id,
+                    draft.transaction_type,
+                    draft.amount_vnd,
+                    draft.description,
+                    draft.transaction_date,
+                    draft.input_source,
+                    draft.exclude_from_saving,
+                ),
+            )
+            row = _fetch_row(cursor, cursor.lastrowid, user_id)
+            if row is None:
+                raise RuntimeError("Không đọc lại được giao dịch vừa tạo.")
+            saved_transactions.append(_row_to_transaction(row))
+
+    return saved_transactions
 
 
 # --- (8. READ: ĐỌC MỘT GIAO DỊCH) ---

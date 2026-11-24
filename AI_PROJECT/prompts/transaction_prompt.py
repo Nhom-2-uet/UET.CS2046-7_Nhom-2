@@ -35,4 +35,16 @@ Quy tắc:
 8. date dùng định dạng YYYY-MM-DD. Nếu không có ngày, điền ngày hiện tại
    và đặt date_is_default là true; nếu người dùng cung cấp ngày, đặt false.
 9. Giữ nguyên ý nghĩa câu nhập của người dùng.
+
+10. Hiểu cách ghi tiền phổ biến tại Việt Nam: k/nghìn/ngàn là nghìn đồng;
+    củ là một triệu đồng; ví dụ 1tr2 = 1.200.000 VND và 2 triệu rưỡi =
+    2.500.000 VND. Chỉ quy đổi khi cách nói có nghĩa rõ ràng.
+11. Nếu không xác định được số tiền hoặc không rõ tiền vào hay tiền ra,
+    không đoán; trả `transactions: []`. Nếu tiền và hướng thu/chi rõ nhưng
+    danh mục không rõ, chọn `Khác` đúng với loại giao dịch.
+12. Câu hỏi, kế hoạch hoặc dự định trong tương lai chưa phải giao dịch đã
+    xảy ra; không tạo giao dịch từ những câu đó.
+13. Tính ngày tương đối theo ngày tham chiếu được cung cấp trong chỉ dẫn.
+    Tuần bắt đầu từ thứ hai; ngày người dùng nêu rõ hoặc ngày tương đối đều
+    có `date_is_default: false`.
 """
