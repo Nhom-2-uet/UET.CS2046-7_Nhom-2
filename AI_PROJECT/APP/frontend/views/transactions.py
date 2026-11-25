@@ -60,29 +60,32 @@ def render_transactions() -> None:
 
         with st.form("add_transaction_form"):
             name = st.text_input("Tên giao dịch", placeholder="Ví dụ: Ăn sáng")
-            amount = st.number_input("Số tiền (VND)", min_value=0, step=1000)
+            amount = st.number_input("Số tiền (VND)", min_value=1, step=1000)
             transaction_date = st.date_input("Ngày giao dịch", value=date.today())
             category = st.selectbox("Danh mục", categories, disabled=not categories)
             submitted = st.form_submit_button(
                 "Thêm giao dịch", disabled=not categories, width="stretch"
             )
         if submitted:
-            try:
-                with st.spinner("Đang lưu giao dịch..."):
-                    request(
-                        "transaction.create",
-                        {
-                            "description": name,
-                            "amount_vnd": int(amount),
-                            "transaction_date": transaction_date,
-                            "category_name": category,
-                            "transaction_type": transaction_type,
-                        },
-                    )
-                st.success("Đã thêm giao dịch.")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Không thể thêm giao dịch: {error}")
+            if amount <= 0:
+                st.error("Số tiền giao dịch phải lớn hơn 0 VND.")
+            else:
+                try:
+                    with st.spinner("Đang lưu giao dịch..."):
+                        request(
+                            "transaction.create",
+                            {
+                                "description": name,
+                                "amount_vnd": int(amount),
+                                "transaction_date": transaction_date,
+                                "category_name": category,
+                                "transaction_type": transaction_type,
+                            },
+                        )
+                    st.success("Đã thêm giao dịch.")
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"Không thể thêm giao dịch: {error}")
 
     try:
         with st.spinner("Đang tải giao dịch..."):
@@ -148,7 +151,7 @@ def render_transactions() -> None:
         with st.form(f"edit_transaction_{selected_id}"):
             edit_name = st.text_input("Tên giao dịch", value=selected["description"])
             edit_amount = st.number_input(
-                "Số tiền (VND)", min_value=0, value=int(selected["amount_vnd"]), step=1000
+                "Số tiền (VND)", min_value=1, value=int(selected["amount_vnd"]), step=1000
             )
             edit_date = st.date_input("Ngày giao dịch", value=selected["transaction_date"])
             edit_category = st.selectbox(
@@ -156,26 +159,29 @@ def render_transactions() -> None:
             )
             save = st.form_submit_button("Lưu thay đổi")
         if save:
-            try:
-                with st.spinner("Đang cập nhật giao dịch..."):
-                    updated = request(
-                        "transaction.update",
-                        {
-                            "transaction_id": int(selected_id),
-                            "description": edit_name,
-                            "amount_vnd": int(edit_amount),
-                            "transaction_date": edit_date,
-                            "category_name": edit_category,
-                            "transaction_type": edit_type,
-                        },
-                    )
-                if updated is None:
-                    st.error("Không tìm thấy giao dịch để cập nhật.")
-                else:
-                    st.success("Đã cập nhật giao dịch.")
-                    st.rerun()
-            except Exception as error:
-                st.error(f"Không thể cập nhật giao dịch: {error}")
+            if edit_amount <= 0:
+                st.error("Số tiền giao dịch phải lớn hơn 0 VND.")
+            else:
+                try:
+                    with st.spinner("Đang cập nhật giao dịch..."):
+                        updated = request(
+                            "transaction.update",
+                            {
+                                "transaction_id": int(selected_id),
+                                "description": edit_name,
+                                "amount_vnd": int(edit_amount),
+                                "transaction_date": edit_date,
+                                "category_name": edit_category,
+                                "transaction_type": edit_type,
+                            },
+                        )
+                    if updated is None:
+                        st.error("Không tìm thấy giao dịch để cập nhật.")
+                    else:
+                        st.success("Đã cập nhật giao dịch.")
+                        st.rerun()
+                except Exception as error:
+                    st.error(f"Không thể cập nhật giao dịch: {error}")
 
     with st.expander("🗑️ Xóa giao dịch"):
         st.warning("Thao tác này xóa giao dịch khỏi cơ sở dữ liệu.")

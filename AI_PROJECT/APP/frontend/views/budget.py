@@ -33,8 +33,8 @@ def render_budget() -> None:
         st.subheader("Thiết lập ngân sách tháng")
         with st.form("monthly_budget_settings_form"):
             monthly_budget = st.number_input(
-                "Ngân sách tháng (VND)", min_value=0, step=100_000,
-                value=int(current.monthly_budget_vnd) if current else 0,
+                "Ngân sách tháng (VND)", min_value=1, step=100_000,
+                value=max(1, int(current.monthly_budget_vnd)) if current else 1,
             )
             weekday_limit = st.number_input(
                 "Hạn mức mỗi ngày thường (VND, 0 = không đặt)", min_value=0, step=10_000,
@@ -51,21 +51,24 @@ def render_budget() -> None:
             )
             submitted = st.form_submit_button("Lưu thiết lập")
         if submitted:
-            try:
-                with st.spinner("Đang lưu thiết lập..."):
-                    settings = request(
-                        "budget.save",
-                        {
-                            "monthly_budget_vnd": int(monthly_budget),
-                            "weekday_daily_limit_vnd": int(weekday_limit),
-                            "weekend_daily_limit_vnd": int(weekend_limit),
-                            "payday": int(payday),
-                        },
-                    )
-                st.success("Đã lưu thiết lập ngân sách.")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Không thể lưu ngân sách: {error}")
+            if monthly_budget <= 0:
+                st.error("Ngân sách tháng phải lớn hơn 0 VND.")
+            else:
+                try:
+                    with st.spinner("Đang lưu thiết lập..."):
+                        settings = request(
+                            "budget.save",
+                            {
+                                "monthly_budget_vnd": int(monthly_budget),
+                                "weekday_daily_limit_vnd": int(weekday_limit),
+                                "weekend_daily_limit_vnd": int(weekend_limit),
+                                "payday": int(payday),
+                            },
+                        )
+                    st.success("Đã lưu thiết lập ngân sách.")
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"Không thể lưu ngân sách: {error}")
         if settings:
             st.metric("Ngân sách tháng", format_vnd(settings.monthly_budget_vnd))
 
@@ -160,19 +163,22 @@ def render_budget() -> None:
     with st.expander("Thêm khoản chi", expanded=False):
         with st.form("required_expense_create_form", clear_on_submit=True):
             name = st.text_input("Tên khoản chi", max_chars=150)
-            amount = st.number_input("Số tiền (VND)", min_value=0, step=10_000)
+            amount = st.number_input("Số tiền (VND)", min_value=1, step=10_000)
             due_date = st.date_input("Ngày đến hạn", value=date.today())
             add = st.form_submit_button("Thêm khoản chi")
         if add:
-            try:
-                with st.spinner("Đang thêm khoản chi..."):
-                    request("expense.create", {
-                        "name": name, "amount_vnd": int(amount), "due_date": due_date
-                    })
-                st.success("Đã thêm khoản chi bắt buộc.")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Không thể thêm khoản chi: {error}")
+            if amount <= 0:
+                st.error("Số tiền khoản chi phải lớn hơn 0 VND.")
+            else:
+                try:
+                    with st.spinner("Đang thêm khoản chi..."):
+                        request("expense.create", {
+                            "name": name, "amount_vnd": int(amount), "due_date": due_date
+                        })
+                    st.success("Đã thêm khoản chi bắt buộc.")
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"Không thể thêm khoản chi: {error}")
 
     status_filter = st.selectbox(
         "Lọc trạng thái", ["Tất cả", *EXPENSE_STATUS_LABELS.values()]
@@ -207,25 +213,28 @@ def render_budget() -> None:
                 with st.form(f"expense_edit_{chosen.expense_id}"):
                     edit_name = st.text_input("Tên khoản chi", value=chosen.name)
                     edit_amount = st.number_input(
-                        "Số tiền (VND)", min_value=0, value=int(chosen.amount_vnd), step=10_000
+                        "Số tiền (VND)", min_value=1, value=int(chosen.amount_vnd), step=10_000
                     )
                     edit_due = st.date_input("Ngày đến hạn", value=chosen.due_date)
                     save = st.form_submit_button("Lưu thay đổi")
                 if save:
-                    try:
-                        updated = request("expense.update", {
-                            "expense_id": chosen.expense_id,
-                            "name": edit_name,
-                            "amount_vnd": int(edit_amount),
-                            "due_date": edit_due,
-                        })
-                        if updated is None:
-                            st.error("Khoản chi không còn ở trạng thái có thể sửa.")
-                        else:
-                            st.success("Đã cập nhật khoản chi.")
-                            st.rerun()
-                    except Exception as error:
-                        st.error(f"Không thể cập nhật khoản chi: {error}")
+                    if edit_amount <= 0:
+                        st.error("Số tiền khoản chi phải lớn hơn 0 VND.")
+                    else:
+                        try:
+                            updated = request("expense.update", {
+                                "expense_id": chosen.expense_id,
+                                "name": edit_name,
+                                "amount_vnd": int(edit_amount),
+                                "due_date": edit_due,
+                            })
+                            if updated is None:
+                                st.error("Khoản chi không còn ở trạng thái có thể sửa.")
+                            else:
+                                st.success("Đã cập nhật khoản chi.")
+                                st.rerun()
+                        except Exception as error:
+                            st.error(f"Không thể cập nhật khoản chi: {error}")
             if st.button("Xóa khoản chi", key=f"expense_delete_{chosen.expense_id}"):
                 try:
                     deleted = request("expense.delete", {"expense_id": chosen.expense_id})
