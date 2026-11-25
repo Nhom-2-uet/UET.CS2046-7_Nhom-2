@@ -1,11 +1,12 @@
 """Tạo kết nối Python tới MySQL Server."""
 
-import os
 from pathlib import Path
 
 import mysql.connector
 from dotenv import load_dotenv
 from mysql.connector import Error
+
+from APP.configuration import get_setting
 
 
 # connection.py nằm trong AI_PROJECT/database, nên parents[1] là AI_PROJECT.
@@ -17,7 +18,7 @@ def get_connection():
     """Mở và trả về một kết nối tới database của ứng dụng."""
 
     required_settings = ("DB_USER", "DB_PASSWORD")
-    missing_settings = [name for name in required_settings if not os.getenv(name)]
+    missing_settings = [name for name in required_settings if not get_setting(name)]
 
     if missing_settings:
         names = ", ".join(missing_settings)
@@ -27,14 +28,22 @@ def get_connection():
         )
 
     try:
-        return mysql.connector.connect(
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=int(os.getenv("DB_PORT", "3306")),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME", "chi_tieu_sinh_vien"),
-            connection_timeout=5,
-        )
+        connection_options = {
+            "host": get_setting("DB_HOST", "127.0.0.1"),
+            "port": int(get_setting("DB_PORT", "3306")),
+            "user": get_setting("DB_USER"),
+            "password": get_setting("DB_PASSWORD"),
+            "database": get_setting("DB_NAME", "chi_tieu_sinh_vien"),
+            "connection_timeout": 5,
+        }
+        ssl_ca = get_setting("DB_SSL_CA")
+        if ssl_ca:
+            connection_options.update(
+                ssl_ca=ssl_ca,
+                ssl_verify_cert=True,
+                ssl_verify_identity=True,
+            )
+        return mysql.connector.connect(**connection_options)
     except Error as exc:
         raise RuntimeError(
             "Không kết nối được MySQL. Hãy kiểm tra MySQL Server đang chạy, "

@@ -15,6 +15,7 @@ QA_SUGGESTIONS = [
     "Tháng này tôi đã chi bao nhiêu?",
     "Danh mục nào tôi chi nhiều nhất?",
     "So sánh chi tiêu tháng này với tháng trước.",
+    "Tôi nên làm gì để tối ưu chi tiêu tháng này?",
 ]
 
 
@@ -197,4 +198,58 @@ def render_ai_assistant() -> None:
                     st.error(f"Không lấy được câu trả lời: {error}")
         if st.session_state.get("ai_answer"):
             st.markdown(f"**Bạn hỏi:** {st.session_state.get('ai_last_question', '')}")
-            st.info(st.session_state["ai_answer"])
+            result = st.session_state["ai_answer"]
+            if isinstance(result, dict):
+                summary = result.get("summary", {})
+                if summary:
+                    income_col, expense_col, remaining_col, category_col = st.columns(4)
+                    income_col.metric("Thu tháng này", format_vnd(summary["income_vnd"]))
+                    expense_col.metric("Chi tháng này", format_vnd(summary["expense_vnd"]))
+                    remaining_value = summary.get("budget_remaining_vnd")
+                    remaining_col.metric(
+                        "Ngân sách còn lại",
+                        format_vnd(remaining_value) if remaining_value is not None else "Chưa thiết lập",
+                    )
+                    category_col.metric(
+                        "Chi nhiều nhất",
+                        summary.get("top_category") or "Chưa có dữ liệu",
+                    )
+                    if not summary.get("has_transactions"):
+                        st.caption(
+                            "Bạn chưa ghi giao dịch trong tháng này; phần tư vấn "
+                            "theo lịch sử chi tiêu sẽ còn hạn chế."
+                        )
+
+                    purchase = summary.get("purchase_assessment")
+                    if purchase:
+                        st.caption(
+                            "Khoản tiền trong câu hỏi được hiểu là "
+                            f"{format_vnd(purchase['amount_vnd'])}."
+                        )
+                        if purchase.get("needs_amount_confirmation"):
+                            st.warning(
+                                "Số tiền được hiểu khá lớn; hãy kiểm tra lại "
+                                "cách ghi số và đơn vị trước khi dựa vào đánh giá này."
+                            )
+                        if purchase.get("can_fit_monthly_plan") is True:
+                            st.success(
+                                "Theo ngân sách linh hoạt ước tính, khoản này "
+                                "có thể nằm trong hạn mức tháng."
+                            )
+                        elif purchase.get("can_fit_monthly_plan") is False:
+                            st.warning(
+                                "Khoản này vượt ngân sách linh hoạt ước tính "
+                                "còn lại trong tháng."
+                            )
+                        else:
+                            st.info(
+                                "Chưa thể kiểm tra khoản mua theo hạn mức vì "
+                                "bạn chưa thiết lập ngân sách tháng."
+                            )
+                        st.caption(
+                            "Đây là ước tính theo ngân sách đã khai báo, không "
+                            "phải số dư tài khoản ngân hàng."
+                        )
+                st.markdown(result.get("answer", ""))
+            else:
+                st.markdown(str(result))
