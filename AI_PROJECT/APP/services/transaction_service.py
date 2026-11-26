@@ -56,8 +56,16 @@ def save_transactions(user_id: int, items: list[dict]):
         description = data.get("description")
         if not isinstance(description, str) or not description.strip():
             raise ValueError("Tên giao dịch không được để trống.")
+
         transaction_type = data.get("transaction_type")
-        category_id = get_category_id(data.get("category_name"), transaction_type)
+        if transaction_type not in {"income", "expense"}:
+            raise ValueError("Loại giao dịch phải là income hoặc expense.")
+
+        category_name = data.get("category_name")
+        if not isinstance(category_name, str) or not category_name.strip():
+            raise ValueError("Tên danh mục không được để trống.")
+
+        category_id = get_category_id(category_name.strip(), transaction_type)
         drafts.append(TransactionDraft(
             category_id=category_id,
             transaction_type=transaction_type,
