@@ -69,7 +69,7 @@ if get_user_id() is None:
                 except Exception as error:
                     st.error(f"Không thể tạo tài khoản: {error}")
 
-    st.info("Cần kết nối MySQL và tạo database theo database/schema.sql trước.")
+    st.info("Nếu bạn chưa có tài khoản, hãy tạo một tài khoản mới để sử dụng ứng dụng.")
     st.stop()
 
 with st.sidebar:
