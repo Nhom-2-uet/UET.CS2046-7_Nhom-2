@@ -3,7 +3,7 @@
 import webbrowser
 
 
-APP_URL = "https://uetcs2046-7nhom-2git-nrjkk29yye8nfmfqpkg4cs.streamlit.app/"
+APP_URL = "https://uetcs2046-7nhom-2git-nrjkk29yye8nfmfqpgk4cs.streamlit.app/?fbclid=IwY2xjawV0f1xleHRuA2FlbQIxMABwZG9mBWJyaWQRMWN4NWVOc0wwelFGbmt2eE5zcnRjBmFwcF9pZBAyMjIwMzkxNzg4MjAwODkyAAEfBQSXXm2q7NJqzNp1f8yCCh21M2fmFZmDv-lAnbQicXLycAvEn_kTIkt-Udc_aem_kVz0XR3dX2vCUAAxC7JLiw"
 
 
 def main() -> int:
