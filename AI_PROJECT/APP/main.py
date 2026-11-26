@@ -1,23 +1,16 @@
-"""Entry point: start the Streamlit expense assistant interface."""
+"""Open the shared Streamlit Community Cloud app in the default browser."""
 
-import subprocess
-import sys
-from pathlib import Path
+import webbrowser
 
 
-APP_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = APP_DIR / "frontend"
-PROJECT_DIR = APP_DIR.parents[1]
-VENV_PYTHON = PROJECT_DIR / "venv" / "Scripts" / "python.exe"
+APP_URL = "https://uetcs2046-7nhom-2git-nrjkk29yye8nfmfqpgk4cs.streamlit.app/?fbclid=IwY2xjawV0f1xleHRuA2FlbQIxMABwZG9mBWJyaWQRMWN4NWVOc0wwelFGbmt2eE5zcnRjBmFwcF9pZBAyMjIwMzkxNzg4MjAwODkyAAEfBQSXXm2q7NJqzNp1f8yCCh21M2fmFZmDv-lAnbQicXLycAvEn_kTIkt-Udc_aem_kVz0XR3dX2vCUAAxC7JLiw"
 
 
 def main() -> int:
-    """Run Streamlit from the project venv when it is available."""
-    python_executable = VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable)
-    return subprocess.call(
-        [str(python_executable), "-m", "streamlit", "run", "app.py"],
-        cwd=FRONTEND_DIR,
-    )
+    """Open the deployed app instead of starting a local Streamlit server."""
+    if not webbrowser.open(APP_URL, new=2):
+        print(f"Không mở được trình duyệt. Hãy truy cập thủ công: {APP_URL}")
+    return 0
 
 
 if __name__ == "__main__":
