@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from APP.services import user_service
+from services.logic.analytics.finance_service import FinanceService
 from services.ai_service import (
     answer_finance_question,
     explain_finance_result,
