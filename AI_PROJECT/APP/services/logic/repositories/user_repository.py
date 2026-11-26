@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from mysql.connector import IntegrityError
+
 from services.logic.repositories._db import open_cursor
 
 
@@ -21,19 +23,25 @@ def create_user_record(
     username: str,
     password_hash: str,
 ) -> dict[str, Any]:
-    """Insert a user and return the public database fields."""
-    with open_cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO users (display_name, username, password_hash)
-            VALUES (%s, %s, %s)
-            """,
-            (display_name, username, password_hash),
-        )
-        row = _fetch_user_by_id(cursor, cursor.lastrowid)
-        if row is None:
-            raise RuntimeError("Không đọc lại được tài khoản vừa tạo.")
-        return row
+    """Insert a user and return public fields, with a friendly duplicate error."""
+    try:
+        with open_cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO users (display_name, username, password_hash)
+                VALUES (%s, %s, %s)
+                """,
+                (display_name, username, password_hash),
+            )
+            row = _fetch_user_by_id(cursor, cursor.lastrowid)
+            if row is None:
+                raise RuntimeError("Không đọc lại được tài khoản vừa tạo.")
+            return row
+    except IntegrityError as error:
+        # MySQL error 1062 means a UNIQUE value, such as username, already exists.
+        if error.errno == 1062:
+            raise ValueError("Tên đăng nhập đã được sử dụng.") from error
+        raise
 
 
 def add_login_to_user_record(
