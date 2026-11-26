@@ -1,0 +1,4 @@
+{
+  "include": ["AI_PROJECT"],
+  "extraPaths": ["AI_PROJECT/APP"]
+}
