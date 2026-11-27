@@ -13,6 +13,7 @@ from services.ai_service import (
     explain_finance_result,
     extract_with_gemini,
 )
+from services.logic.analytics.finance_service import FinanceService
 from services.logic.repositories import budget_repository as budgets
 from services.logic.repositories import required_expense_repository as expenses
 from services.logic.repositories import saving_goal_repository as goals
