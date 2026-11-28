@@ -76,7 +76,7 @@ def confirm_and_save_transaction(
 
 def get_transaction_categories(transaction_type: str) -> list[str]:
     """Return categories available for the selected transaction type."""
-    return get_categories(transaction_type)
+    return [category["name"] for category in get_categories(transaction_type)]
 
 
 def confirm_and_save_transactions(

@@ -129,11 +129,15 @@ def _build_finance_answer(question: str, user_id: int) -> dict[str, Any]:
     )
 
     budget = budgets.get_budget_settings(user_id)
-    budget_limit = int(budget.monthly_budget_vnd) if budget else None
-    reserve_amount = (
-        int(Decimal(budget_limit) * Decimal(str(budget.reserve_rate)))
-        if budget else None
-    )
+    if budget is not None:
+        budget_limit_value = int(budget.monthly_budget_vnd)
+        budget_limit: int | None = budget_limit_value
+        reserve_amount: int | None = int(
+            Decimal(budget_limit_value) * Decimal(str(budget.reserve_rate))
+        )
+    else:
+        budget_limit = None
+        reserve_amount = None
     remaining_budget = budget_limit - current_expense if budget_limit is not None else None
 
     unpaid_expenses = expenses.get_required_expenses(user_id, status="unpaid")
@@ -236,7 +240,6 @@ def _build_finance_answer(question: str, user_id: int) -> dict[str, Any]:
 
 
 def execute(command: str, data: dict[str, Any]) -> Any:
-    user_id = data.get("user_id")
     if command == "auth.login":
         user = user_service.authenticate_user(data["username"], data["password"])
         if user is None:
@@ -246,6 +249,26 @@ def execute(command: str, data: dict[str, Any]) -> Any:
         return user_service.create_user(
             data["username"], data["password"], data["display_name"]
         )
+    if command == "ai.extract":
+        return extract_with_gemini(data["text"])
+    if command == "ai.explain":
+        return explain_finance_result(data["result"])
+
+    user_commands = {
+        "transaction.categories", "transaction.list", "transaction.create",
+        "transaction.create_many", "transaction.update", "transaction.delete",
+        "budget.get", "budget.save", "expense.list", "expense.create",
+        "expense.update", "expense.delete", "goal.list", "goal.create",
+        "goal.update", "goal.cancel", "finance.ask", "finance.summary",
+    }
+    if command not in user_commands:
+        raise ValueError(f"Lệnh không được hỗ trợ: {command}")
+
+    raw_user_id = data.get("user_id")
+    if raw_user_id is None:
+        raise ValueError("Vui lòng đăng nhập để thực hiện thao tác này.")
+    user_id: int = int(raw_user_id)
+
     if command == "transaction.categories":
         return get_categories(data.get("transaction_type"))
     if command == "transaction.list":
@@ -295,10 +318,6 @@ def execute(command: str, data: dict[str, Any]) -> Any:
         )
     if command == "goal.cancel":
         return goals.cancel_saving_goal(user_id, data["goal_id"])
-    if command == "ai.extract":
-        return extract_with_gemini(data["text"])
-    if command == "ai.explain":
-        return explain_finance_result(data["result"])
     if command == "finance.ask":
         return _build_finance_answer(data["question"], user_id)
     if command == "finance.summary":
