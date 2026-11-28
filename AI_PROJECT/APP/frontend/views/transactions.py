@@ -1,174 +1,304 @@
-from datetime import date
+"""Transaction list, filters and existing create/update/delete workflows."""
 
-import pandas as pd
+from datetime import date, datetime, timedelta
+from html import escape
+from typing import Any
+
 import streamlit as st
 
 from frontend.api_client import request
+from frontend.components.design_system import (
+    render_empty_state,
+    render_error_state,
+    render_page_header,
+    section_container,
+)
+from utils.formatting import format_date, format_vnd
 
 
 TYPE_LABELS = {"expense": "Chi tiêu", "income": "Thu nhập"}
 TYPE_VALUES = {label: value for value, label in TYPE_LABELS.items()}
 
+_TRANSACTION_STYLES = """
+<style>
+.transactions-period-note { color: #8491a3; font-size: .84rem; margin: -.2rem 0 .8rem; }
+.transactions-section-title { margin: 1.25rem 0 .25rem; color: #202938; font-size: 1.08rem; font-weight: 700; }
+.transactions-section-caption { margin: 0 0 .7rem; color: #8491a3; font-size: .84rem; }
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-color: #e7edf5;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(34, 63, 100, .045);
+    transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    border-color: #d8e4f3;
+    box-shadow: 0 7px 20px rgba(34, 63, 100, .075);
+}
+.transaction-summary { min-height: 112px; }
+.transaction-summary-head { display: flex; align-items: center; gap: .65rem; }
+.transaction-summary-icon { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .65rem; background: #eef5ff; color: #3984e8; font-size: 1rem; font-weight: 700; }
+.transaction-summary-label { color: #8491a3; font-size: .82rem; font-weight: 600; }
+.transaction-summary-value { margin-top: .65rem; color: #202938; font-size: clamp(1.25rem, 2vw, 1.7rem); font-weight: 750; letter-spacing: -.025em; }
+.transaction-summary-income .transaction-summary-icon { color: #168451; background: #eaf7f0; }
+.transaction-summary-expense .transaction-summary-icon { color: #c94a42; background: #fff0ef; }
+.transaction-summary-balance .transaction-summary-icon { color: #3984e8; background: #eef5ff; }
+.transaction-summary-count .transaction-summary-icon { color: #65748b; background: #f0f3f7; }
+.transaction-kind { display: inline-block; border-radius: 999px; padding: .18rem .55rem; font-size: .74rem; font-weight: 650; }
+.transaction-income { color: #168451; background: #e8f7ef; }
+.transaction-expense { color: #c94a42; background: #fff0ef; }
+.transaction-unknown { color: #64748b; background: #eef2f7; }
+.transaction-amount { margin-top: .15rem; font-size: 1.12rem; font-weight: 720; white-space: nowrap; text-align: right; }
+.transaction-amount-income { color: #168451; }
+.transaction-amount-expense { color: #202938; }
+.transaction-amount-unknown { color: #64748b; }
+.transaction-category-icon { display: grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: .8rem; font-size: 1.1rem; font-weight: 700; }
+.transaction-category-icon-income { color: #168451; background: #eaf7f0; }
+.transaction-category-icon-expense { color: #3984e8; background: #eef5ff; }
+.transaction-card-title { color: #202938; font-size: .98rem; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.transaction-card-meta { color: #8491a3; font-size: .8rem; line-height: 1.45; }
+.transaction-empty-icon { display: grid; width: 3rem; height: 3rem; margin: 0 auto .7rem; place-items: center; border-radius: 1rem; color: #3984e8; background: #eef5ff; font-size: 1.4rem; }
+.transaction-empty { padding: .6rem .25rem; text-align: center; }
+[data-testid="stMetricLabel"] p { color: #8491a3; font-size: .82rem; font-weight: 600; }
+[data-testid="stMetricValue"] { color: #202938; font-size: clamp(1.15rem, 2vw, 1.55rem); }
+@media (max-width: 700px) {
+    .transactions-section-title { margin-top: 1rem; }
+    .transaction-summary { min-height: 100px; }
+    .transaction-summary-value { font-size: 1.25rem; }
+    .transaction-amount { font-size: 1rem; }
+}
+</style>
+"""
 
-def _format_vnd(amount: int) -> str:
-    return f"{amount:,.0f} đ".replace(",", ".")
+
+def _field(record: Any, name: str, default: Any = None) -> Any:
+    if isinstance(record, dict):
+        return record.get(name, default)
+    return getattr(record, name, default)
 
 
-def _record_dict(record) -> dict:
+def _amount(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return amount if amount >= 0 else None
+
+
+def _parse_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_dict(record: Any) -> dict[str, Any]:
+    """Normalize a transaction model or mapping for consistent page rendering."""
     return {
-        "transaction_id": record.transaction_id,
-        "transaction_date": record.transaction_date,
-        "description": record.description or "",
-        "category_name": record.category_name,
-        "transaction_type": record.transaction_type,
-        "amount_vnd": record.amount_vnd,
+        "transaction_id": _field(record, "transaction_id"),
+        "transaction_date": _parse_date(_field(record, "transaction_date")),
+        "description": str(_field(record, "description") or "").strip(),
+        "category_name": _field(record, "category_name"),
+        "transaction_type": _field(record, "transaction_type"),
+        "amount_vnd": _amount(_field(record, "amount_vnd")),
     }
 
 
 def _load_categories(transaction_type: str) -> list[str]:
-    return [
-        row["name"]
-        for row in request(
-            "transaction.categories", {"transaction_type": transaction_type}
+    """Load only category names returned by the existing categories command."""
+    result = request("transaction.categories", {"transaction_type": transaction_type})
+    if not isinstance(result, list):
+        raise TypeError("API danh mục không trả về danh sách.")
+    return sorted(
+        {
+            row["name"].strip()
+            for row in result
+            if isinstance(row, dict)
+            and isinstance(row.get("name"), str)
+            and row["name"].strip()
+        }
+    )
+
+
+def _open_add_form() -> None:
+    st.session_state["transaction_add_open"] = True
+
+
+def _close_add_form() -> None:
+    st.session_state["transaction_add_open"] = False
+
+
+def _clear_filters() -> None:
+    st.session_state["transaction_search"] = ""
+    st.session_state["transaction_period"] = "Toàn thời gian"
+    st.session_state["transaction_type_filter"] = "Tất cả"
+    st.session_state["transaction_category_filter"] = "Tất cả"
+    st.session_state["transaction_start_date"] = date.today().replace(day=1)
+    st.session_state["transaction_end_date"] = date.today()
+
+
+def _month_bounds(value: date, offset: int = 0) -> tuple[date, date]:
+    month_index = value.year * 12 + value.month - 1 + offset
+    year, month_index = divmod(month_index, 12)
+    start = date(year, month_index + 1, 1)
+    next_month_index = year * 12 + month_index + 1
+    next_year, next_month_index = divmod(next_month_index, 12)
+    end = date(next_year, next_month_index + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+def _show_add_form() -> None:
+    if not st.session_state.get("transaction_add_open", False):
+        return
+
+    with section_container():
+        form_title, close_col = st.columns([4, 1])
+        form_title.markdown("**Thêm giao dịch mới**")
+        close_col.button("Đóng", on_click=_close_add_form, key="close_add_transaction")
+        type_label = st.selectbox(
+            "Loại giao dịch",
+            list(TYPE_VALUES),
+            key="new_transaction_type",
         )
-    ]
-
-
-def render_transactions() -> None:
-    st.header("Quản lý giao dịch")
-    st.caption("Giao dịch được tải và lưu trực tiếp qua backend.")
-
-    add_col, refresh_col = st.columns([4, 1])
-    with add_col:
-        st.subheader("Thêm giao dịch")
-    with refresh_col:
-        if st.button("Làm mới", use_container_width=True):
-            st.rerun()
-
-    with st.expander("➕ Thêm giao dịch mới", expanded=False):
-        transaction_type_label = st.selectbox(
-            "Loại giao dịch", list(TYPE_VALUES), key="new_transaction_type"
-        )
-        transaction_type = TYPE_VALUES[transaction_type_label]
+        transaction_type = TYPE_VALUES[type_label]
         try:
             categories = _load_categories(transaction_type)
         except Exception as error:
-            st.error(f"Không tải được danh mục: {error}")
             categories = []
+            render_error_state(f"Không tải được danh mục: {error}")
         if not categories:
-            st.warning("Chưa có danh mục đang hoạt động cho loại giao dịch này.")
+            st.info("Chưa có danh mục đang hoạt động cho loại giao dịch này.")
 
-        with st.form("add_transaction_form"):
+        with st.form("add_transaction_form", clear_on_submit=True):
             name = st.text_input("Tên giao dịch", placeholder="Ví dụ: Ăn sáng")
-            amount = st.number_input("Số tiền (VND)", min_value=1, step=1000)
+            amount = st.number_input("Số tiền (VND)", min_value=1, step=1_000)
             transaction_date = st.date_input("Ngày giao dịch", value=date.today())
-            category = st.selectbox("Danh mục", categories, disabled=not categories)
+            category = st.selectbox(
+                "Danh mục", categories, disabled=not categories
+            )
             submitted = st.form_submit_button(
-                "Thêm giao dịch", disabled=not categories, width="stretch"
+                "Thêm giao dịch",
+                type="primary",
+                disabled=not categories,
+                use_container_width=True,
             )
         if submitted:
-            if amount <= 0:
-                st.error("Số tiền giao dịch phải lớn hơn 0 VND.")
+            if not name.strip() or amount <= 0:
+                render_error_state("Vui lòng nhập tên giao dịch và số tiền lớn hơn 0.")
             else:
                 try:
                     with st.spinner("Đang lưu giao dịch..."):
                         request(
                             "transaction.create",
                             {
-                                "description": name,
+                                "description": name.strip(),
                                 "amount_vnd": int(amount),
                                 "transaction_date": transaction_date,
                                 "category_name": category,
                                 "transaction_type": transaction_type,
                             },
                         )
-                    st.success("Đã thêm giao dịch.")
+                    st.session_state["transaction_add_open"] = False
+                    st.session_state["transaction_notice"] = (
+                        "success",
+                        "Đã thêm giao dịch.",
+                    )
                     st.rerun()
                 except Exception as error:
-                    st.error(f"Không thể thêm giao dịch: {error}")
+                    render_error_state(f"Không thể thêm giao dịch: {error}")
 
-    try:
-        with st.spinner("Đang tải giao dịch..."):
-            records = request("transaction.list")
-    except Exception as error:
-        st.error(f"Không tải được danh sách giao dịch: {error}")
+
+def _edit_transaction(record: dict[str, Any]) -> None:
+    transaction_id = record["transaction_id"]
+    if not isinstance(transaction_id, int):
+        render_error_state("Giao dịch này thiếu mã hợp lệ nên không thể chỉnh sửa.")
         return
 
-    transactions = pd.DataFrame([_record_dict(row) for row in records])
-    st.subheader("Lịch sử giao dịch")
-    if transactions.empty:
-        st.info("Chưa có giao dịch nào.")
-        return
-
-    col_search, col_type, col_category = st.columns(3)
-    search = col_search.text_input("Tìm kiếm", placeholder="Tên giao dịch")
-    type_label = col_type.selectbox("Loại giao dịch", ["Tất cả", *TYPE_VALUES])
-    category_name = col_category.selectbox(
-        "Danh mục", ["Tất cả", *sorted(transactions["category_name"].unique())]
-    )
-
-    filtered = transactions.copy()
-    if search:
-        filtered = filtered[filtered["description"].str.contains(search, case=False, na=False)]
-    if type_label != "Tất cả":
-        filtered = filtered[filtered["transaction_type"] == TYPE_VALUES[type_label]]
-    if category_name != "Tất cả":
-        filtered = filtered[filtered["category_name"] == category_name]
-
-    display = filtered.copy()
-    display["Ngày"] = display["transaction_date"].map(lambda value: value.strftime("%d/%m/%Y"))
-    display["Loại"] = display["transaction_type"].map(TYPE_LABELS)
-    display["Số tiền"] = display["amount_vnd"].map(_format_vnd)
-    st.dataframe(
-        display[["Ngày", "description", "category_name", "Loại", "Số tiền"]].rename(
-            columns={"description": "Tên giao dịch", "category_name": "Danh mục"}
-        ),
-        hide_index=True,
-        use_container_width=True,
-    )
-    st.caption(f"Tìm thấy {len(filtered)} giao dịch.")
-
-    transaction_ids = filtered["transaction_id"].astype(int).tolist()
-    if not transaction_ids:
-        return
-    selected_id = st.selectbox("Chọn giao dịch để sửa hoặc xóa", transaction_ids)
-    selected = transactions.loc[transactions["transaction_id"] == selected_id].iloc[0]
-    with st.expander("✏️ Chỉnh sửa giao dịch"):
-        current_type = selected["transaction_type"]
-        edit_type_label = st.selectbox(
-            "Loại giao dịch", list(TYPE_VALUES),
-            index=list(TYPE_VALUES.values()).index(current_type),
-            key=f"edit_type_{selected_id}",
+    with section_container():
+        st.markdown("**Chỉnh sửa giao dịch**")
+        current_type = record["transaction_type"]
+        current_type_label = TYPE_LABELS.get(current_type, "Chi tiêu")
+        type_label = st.selectbox(
+            "Loại giao dịch",
+            list(TYPE_VALUES),
+            index=list(TYPE_VALUES).index(current_type_label),
+            key=f"edit_type_{transaction_id}",
         )
-        edit_type = TYPE_VALUES[edit_type_label]
+        edit_type = TYPE_VALUES[type_label]
+        categories_error = None
         try:
             edit_categories = _load_categories(edit_type)
         except Exception as error:
-            st.error(f"Không tải được danh mục: {error}")
             edit_categories = []
-        if selected["category_name"] not in edit_categories:
-            edit_categories.append(selected["category_name"])
-        with st.form(f"edit_transaction_{selected_id}"):
-            edit_name = st.text_input("Tên giao dịch", value=selected["description"])
+            categories_error = error
+            render_error_state(f"Không tải được danh mục: {error}")
+        current_category = record["category_name"]
+        if (
+            edit_type == current_type
+            and isinstance(current_category, str)
+            and current_category not in edit_categories
+        ):
+            edit_categories.append(current_category)
+        if edit_categories and current_category in edit_categories:
+            category_index = edit_categories.index(current_category)
+        else:
+            category_index = 0
+
+        with st.form(f"edit_transaction_{transaction_id}"):
+            edit_name = st.text_input(
+                "Tên giao dịch",
+                value=record["description"],
+                key=f"edit_name_{transaction_id}",
+            )
             edit_amount = st.number_input(
-                "Số tiền (VND)", min_value=1, value=int(selected["amount_vnd"]), step=1000
+                "Số tiền (VND)",
+                min_value=1,
+                value=max(1, record["amount_vnd"] or 1),
+                step=1_000,
+                key=f"edit_amount_{transaction_id}",
             )
-            edit_date = st.date_input("Ngày giao dịch", value=selected["transaction_date"])
+            current_date = record["transaction_date"] or date.today()
+            edit_date = st.date_input(
+                "Ngày giao dịch",
+                value=current_date,
+                key=f"edit_date_{transaction_id}",
+            )
             edit_category = st.selectbox(
-                "Danh mục", edit_categories, key=f"edit_category_{selected_id}"
+                "Danh mục",
+                edit_categories,
+                index=category_index,
+                disabled=not edit_categories,
+                key=f"edit_category_{transaction_id}",
             )
-            save = st.form_submit_button("Lưu thay đổi")
+            save = st.form_submit_button(
+                "Lưu thay đổi",
+                type="primary",
+                disabled=not edit_categories or categories_error is not None,
+            )
+            cancel = st.form_submit_button("Hủy")
+
+        if cancel:
+            st.session_state["transaction_edit_id"] = None
+            st.rerun()
         if save:
-            if edit_amount <= 0:
-                st.error("Số tiền giao dịch phải lớn hơn 0 VND.")
+            if not edit_name.strip() or edit_amount <= 0:
+                render_error_state("Vui lòng nhập tên giao dịch và số tiền lớn hơn 0.")
             else:
                 try:
                     with st.spinner("Đang cập nhật giao dịch..."):
                         updated = request(
                             "transaction.update",
                             {
-                                "transaction_id": int(selected_id),
-                                "description": edit_name,
+                                "transaction_id": int(transaction_id),
+                                "description": edit_name.strip(),
                                 "amount_vnd": int(edit_amount),
                                 "transaction_date": edit_date,
                                 "category_name": edit_category,
@@ -176,25 +306,377 @@ def render_transactions() -> None:
                             },
                         )
                     if updated is None:
-                        st.error("Không tìm thấy giao dịch để cập nhật.")
+                        render_error_state("Không tìm thấy giao dịch để cập nhật.")
                     else:
-                        st.success("Đã cập nhật giao dịch.")
+                        st.session_state["transaction_edit_id"] = None
+                        st.session_state["transaction_notice"] = (
+                            "success",
+                            "Đã cập nhật giao dịch.",
+                        )
                         st.rerun()
                 except Exception as error:
-                    st.error(f"Không thể cập nhật giao dịch: {error}")
+                    render_error_state(f"Không thể cập nhật giao dịch: {error}")
 
-    with st.expander("🗑️ Xóa giao dịch"):
-        st.warning("Thao tác này xóa giao dịch khỏi cơ sở dữ liệu.")
-        if st.button("Xóa giao dịch", key=f"delete_transaction_{selected_id}"):
+
+def _confirm_delete(record: dict[str, Any]) -> None:
+    transaction_id = record["transaction_id"]
+    if not isinstance(transaction_id, int):
+        render_error_state("Giao dịch này thiếu mã hợp lệ nên không thể xóa.")
+        return
+    with section_container():
+        st.warning(
+            f"Bạn sắp xóa giao dịch “{record['description'] or 'Giao dịch'}”. Thao tác này không thể hoàn tác."
+        )
+        cancel_col, delete_col = st.columns([1, 1])
+        if cancel_col.button("Giữ lại", key="cancel_transaction_delete"):
+            st.session_state["transaction_delete_id"] = None
+            st.rerun()
+        if delete_col.button(
+            "Xác nhận xóa",
+            key="confirm_transaction_delete",
+            type="primary",
+        ):
             try:
                 with st.spinner("Đang xóa giao dịch..."):
                     deleted = request(
-                        "transaction.delete", {"transaction_id": int(selected_id)}
+                        "transaction.delete", {"transaction_id": int(transaction_id)}
                     )
                 if deleted:
-                    st.success("Đã xóa giao dịch.")
+                    st.session_state["transaction_delete_id"] = None
+                    st.session_state["transaction_notice"] = (
+                        "success",
+                        "Đã xóa giao dịch.",
+                    )
                     st.rerun()
                 else:
-                    st.error("Không tìm thấy giao dịch để xóa.")
+                    render_error_state("Không tìm thấy giao dịch để xóa.")
             except Exception as error:
-                st.error(f"Không thể xóa giao dịch: {error}")
+                render_error_state(f"Không thể xóa giao dịch: {error}")
+
+
+def _render_summary_card(column: Any, icon: str, label: str, value: str, tone: str) -> None:
+    with column:
+        with section_container():
+            st.markdown(
+                f'<div class="transaction-summary transaction-summary-{tone}" role="group" aria-label="{escape(label)}">'
+                f'<div class="transaction-summary-head"><span class="transaction-summary-icon" aria-hidden="true">{escape(icon)}</span>'
+                f'<span class="transaction-summary-label">{escape(label)}</span></div>'
+                f'<div class="transaction-summary-value">{escape(value)}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+
+def render_transactions() -> None:
+    st.markdown(_TRANSACTION_STYLES, unsafe_allow_html=True)
+    if "transaction_add_open" not in st.session_state:
+        st.session_state["transaction_add_open"] = False
+
+    header, action = st.columns([3, 1])
+    with header:
+        render_page_header(
+            "Giao dịch",
+            "Theo dõi các khoản thu chi và quản lý lịch sử giao dịch của bạn.",
+        )
+
+    load_error = None
+    try:
+        with st.spinner("Đang tải giao dịch..."):
+            records = request("transaction.list")
+        if not isinstance(records, list):
+            raise TypeError("API transaction.list không trả về danh sách.")
+    except Exception as error:
+        records = None
+        load_error = error
+
+    transactions = [_record_dict(record) for record in records] if records is not None else []
+    if transactions or load_error is not None:
+        action.button(
+            "Thêm giao dịch",
+            type="primary",
+            use_container_width=True,
+            on_click=_open_add_form,
+        )
+
+    notice = st.session_state.pop("transaction_notice", None)
+    if notice:
+        if notice[0] == "success":
+            st.success(notice[1])
+        else:
+            render_error_state(notice[1])
+
+    _show_add_form()
+
+    if load_error is not None:
+        render_error_state(f"Không tải được danh sách giao dịch: {load_error}")
+        return
+
+    valid_categories = sorted(
+        {
+            transaction["category_name"]
+            for transaction in transactions
+            if isinstance(transaction["category_name"], str)
+            and transaction["category_name"].strip()
+        }
+    )
+    category_options = ["Tất cả", *valid_categories]
+    if st.session_state.get("transaction_category_filter", "Tất cả") not in category_options:
+        st.session_state["transaction_category_filter"] = "Tất cả"
+    if "transaction_period" not in st.session_state:
+        st.session_state["transaction_period"] = "Toàn thời gian"
+    if "transaction_type_filter" not in st.session_state:
+        st.session_state["transaction_type_filter"] = "Tất cả"
+    if "transaction_search" not in st.session_state:
+        st.session_state["transaction_search"] = ""
+
+    with section_container():
+        st.caption("Tìm và lọc giao dịch")
+        search_col, period_col, type_col, category_col, clear_col = st.columns(
+            [2.1, 1.35, 1.05, 1.2, .8]
+        )
+        search = search_col.text_input(
+            "Tìm giao dịch",
+            placeholder="Tên giao dịch...",
+            key="transaction_search",
+        )
+        period = period_col.selectbox(
+            "Khoảng thời gian",
+            ["Toàn thời gian", "Tháng này", "Tháng trước", "Tùy chỉnh"],
+            key="transaction_period",
+        )
+        type_label = type_col.selectbox(
+            "Loại giao dịch",
+            ["Tất cả", *TYPE_VALUES],
+            format_func=lambda value: value if value == "Tất cả" else value,
+            key="transaction_type_filter",
+        )
+        category_name = category_col.selectbox(
+            "Danh mục",
+            category_options,
+            key="transaction_category_filter",
+        )
+        clear_col.button(
+            "Đặt lại",
+            help="Xóa tất cả bộ lọc",
+            on_click=_clear_filters,
+            use_container_width=True,
+            type="tertiary",
+        )
+        date_start = date_end = None
+        today = date.today()
+        if period == "Tháng này":
+            date_start, date_end = _month_bounds(today)
+        elif period == "Tháng trước":
+            date_start, date_end = _month_bounds(today, -1)
+        elif period == "Tùy chỉnh":
+            if "transaction_start_date" not in st.session_state:
+                st.session_state["transaction_start_date"] = today.replace(day=1)
+            if "transaction_end_date" not in st.session_state:
+                st.session_state["transaction_end_date"] = today
+            start_col, end_col = st.columns(2)
+            date_start = start_col.date_input(
+                "Từ ngày", key="transaction_start_date"
+            )
+            date_end = end_col.date_input(
+                "Đến ngày", key="transaction_end_date"
+            )
+
+    if date_start and date_end and date_start > date_end:
+        render_error_state("Ngày bắt đầu không được sau ngày kết thúc.")
+        return
+
+    filtered = transactions
+    if date_start:
+        filtered = [
+            item
+            for item in filtered
+            if item["transaction_date"] is not None
+            and date_start <= item["transaction_date"] <= date_end
+        ]
+    if type_label != "Tất cả":
+        filtered = [
+            item for item in filtered
+            if item["transaction_type"] == TYPE_VALUES[type_label]
+        ]
+    if category_name != "Tất cả":
+        filtered = [
+            item for item in filtered if item["category_name"] == category_name
+        ]
+    if search:
+        query = search.casefold()
+        filtered = [
+            item for item in filtered
+            if query in item["description"].casefold()
+        ]
+
+    period_label = (
+        f"{format_date(date_start)} – {format_date(date_end)}"
+        if date_start and date_end
+        else "Tất cả thời gian"
+    )
+    st.markdown(
+        f'<div class="transactions-period-note">Đang xem: {escape(period_label)} · {len(filtered)} giao dịch</div>',
+        unsafe_allow_html=True,
+    )
+
+    income_total = sum(
+        item["amount_vnd"] or 0
+        for item in filtered
+        if item["transaction_type"] == "income"
+    )
+    expense_total = sum(
+        item["amount_vnd"] or 0
+        for item in filtered
+        if item["transaction_type"] == "expense"
+    )
+    metrics = st.columns(4)
+    metric_values = [
+        ("↗", "Tổng thu", format_vnd(income_total), "income"),
+        ("↘", "Tổng chi", format_vnd(expense_total), "expense"),
+        ("±", "Chênh lệch", format_vnd(income_total - expense_total), "balance"),
+        ("#", "Số giao dịch", f"{len(filtered):,}", "count"),
+    ]
+    for column, (icon, label, value, tone) in zip(metrics, metric_values):
+        _render_summary_card(column, icon, label, value, tone)
+
+    st.markdown(
+        '<div class="transactions-section-title">Danh sách giao dịch</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="transactions-section-caption">Các khoản thu và chi được sắp xếp theo ngày mới nhất.</div>',
+        unsafe_allow_html=True,
+    )
+    filtered.sort(
+        key=lambda item: item["transaction_date"] or date.min,
+        reverse=True,
+    )
+    if not filtered:
+        if transactions:
+            render_empty_state("Không tìm thấy giao dịch phù hợp với bộ lọc.")
+            st.button("Xóa bộ lọc và xem tất cả", on_click=_clear_filters, type="secondary")
+        else:
+            with section_container():
+                st.markdown(
+                    '<div class="transaction-empty"><div class="transaction-empty-icon" aria-hidden="true">＋</div>'
+                    '<div class="transaction-card-title">Chưa có giao dịch</div>'
+                    '<div class="transaction-card-meta">Thêm khoản thu hoặc chi đầu tiên để bắt đầu theo dõi tài chính.</div></div>',
+                    unsafe_allow_html=True,
+                )
+                if not st.session_state.get("transaction_add_open", False):
+                    st.button(
+                        "Thêm giao dịch đầu tiên",
+                        type="primary",
+                        on_click=_open_add_form,
+                        use_container_width=True,
+                    )
+        return
+
+    for offset in range(0, len(filtered), 2):
+        card_columns = st.columns(2)
+        for column, item in zip(card_columns, filtered[offset : offset + 2]):
+            with column:
+                with section_container():
+                    transaction_type = item["transaction_type"]
+                    type_icon = (
+                        "↗" if transaction_type == "income"
+                        else "↘" if transaction_type == "expense"
+                        else "·"
+                    )
+                    icon_class = (
+                        "transaction-category-icon-income"
+                        if transaction_type == "income"
+                        else "transaction-category-icon-expense"
+                        if transaction_type == "expense"
+                        else "transaction-unknown"
+                    )
+                    icon_col, top, amount_col = st.columns([.55, 3, 1.45])
+                    icon_col.markdown(
+                        f'<div class="transaction-category-icon {icon_class}" aria-hidden="true">{type_icon}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    description = escape(item["description"] or "Giao dịch")
+                    top.markdown(
+                        f'<div class="transaction-card-title">{description}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    date_text = (
+                        format_date(item["transaction_date"])
+                        if item["transaction_date"]
+                        else "Chưa có ngày"
+                    )
+                    category_text = escape(str(item["category_name"] or "—"))
+                    top.markdown(
+                        f'<div class="transaction-card-meta">{category_text}<br>{date_text}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    kind_label = TYPE_LABELS.get(transaction_type, "Không xác định")
+                    kind_class = (
+                        "transaction-income"
+                        if transaction_type == "income"
+                        else "transaction-expense"
+                        if transaction_type == "expense"
+                        else "transaction-unknown"
+                    )
+                    amount_class = (
+                        "transaction-amount-income"
+                        if transaction_type == "income"
+                        else "transaction-amount-expense"
+                        if transaction_type == "expense"
+                        else "transaction-amount-unknown"
+                    )
+                    amount_text = (
+                        format_vnd(item["amount_vnd"])
+                        if item["amount_vnd"] is not None
+                        else "—"
+                    )
+                    sign = (
+                        "+" if transaction_type == "income"
+                        else "−" if transaction_type == "expense"
+                        else ""
+                    )
+                    amount_col.markdown(
+                        f'<div class="transaction-amount {amount_class}">{sign}{amount_text}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<span class="transaction-kind {kind_class}">{kind_label}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    _spacer, edit_col, delete_col = st.columns([3, 1, 1])
+                    if edit_col.button(
+                        "Sửa",
+                        key=f"transaction_edit_{item['transaction_id']}",
+                        type="tertiary",
+                        help="Chỉnh sửa giao dịch",
+                        disabled=not isinstance(item["transaction_id"], int),
+                    ):
+                        st.session_state["transaction_edit_id"] = item["transaction_id"]
+                        st.session_state["transaction_delete_id"] = None
+                    if delete_col.button(
+                        "Xóa",
+                        key=f"transaction_delete_{item['transaction_id']}",
+                        type="tertiary",
+                        help="Xóa giao dịch",
+                        disabled=not isinstance(item["transaction_id"], int),
+                    ):
+                        st.session_state["transaction_delete_id"] = item["transaction_id"]
+                        st.session_state["transaction_edit_id"] = None
+
+    selected_edit = next(
+        (
+            item for item in filtered
+            if item["transaction_id"] == st.session_state.get("transaction_edit_id")
+        ),
+        None,
+    )
+    selected_delete = next(
+        (
+            item for item in filtered
+            if item["transaction_id"] == st.session_state.get("transaction_delete_id")
+        ),
+        None,
+    )
+    if selected_edit:
+        _edit_transaction(selected_edit)
+    elif selected_delete:
+        _confirm_delete(selected_delete)

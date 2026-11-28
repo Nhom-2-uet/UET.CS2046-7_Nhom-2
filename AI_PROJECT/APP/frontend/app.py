@@ -16,16 +16,24 @@ from frontend.api_client import login, register
 from frontend.components.design_system import (
     apply_design_system,
     render_brand,
-    render_empty_state,
-    render_page_header,
-    section_container,
 )
 from frontend.user_state import get_display_name, get_user_id, set_user
+from views.account import render_account
 from views.dashboard import render_dashboard
 from views.transactions import render_transactions
 from views.ai_assistant import render_ai_assistant
 from views.budget import render_budget
 from views.saving_goals import render_saving_goals
+
+
+def _logout_current_user() -> None:
+    """Clear the same session state used by the existing sidebar logout."""
+    set_user(None)
+    for key in list(st.session_state):
+        if key.startswith("ai_"):
+            del st.session_state[key]
+    st.session_state.pop("app_page", None)
+    st.rerun()
 
 
 st.set_page_config(
@@ -84,12 +92,7 @@ with st.sidebar:
     render_brand()
     st.caption(f"Đang đăng nhập: {get_display_name() or 'Người dùng'}")
     if st.button("Đăng xuất", use_container_width=True):
-        set_user(None)
-        for key in list(st.session_state):
-            if key.startswith("ai_"):
-                del st.session_state[key]
-        st.session_state.pop("app_page", None)
-        st.rerun()
+        _logout_current_user()
     st.markdown("---")
     st.caption("ĐIỀU HƯỚNG")
     selected_page = st.radio(
@@ -110,10 +113,4 @@ elif selected_page == "Budget":
 elif selected_page == "Saving Goals":
     render_saving_goals()
 else:
-    render_page_header("Account", "Thông tin và cài đặt tài khoản.")
-    with section_container():
-        st.subheader("Tính năng đang được phát triển")
-        render_empty_state(
-            "Trang tài khoản chưa được tích hợp với backend. "
-            "Các thao tác hồ sơ sẽ xuất hiện khi có command hỗ trợ."
-        )
+    render_account(_logout_current_user)
